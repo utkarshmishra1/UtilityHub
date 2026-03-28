@@ -1,0 +1,12 @@
+{
+  "stocks_processed": 1,
+  "documents_indexed": 0,
+  "pdfs_downloaded_now": 0,
+  "texts_extracted_now": 0,
+  "failures": 48,
+  "extract_text_enabled": true,
+  "has_pypdf": true,
+  "output_dir": "/Users/utkarshmishra/Desktop/Learn_SwiftUI/UtilityHub/stock_docs_india_sample",
+  "metadata_jsonl": "/Users/utkarshmishra/Desktop/Learn_SwiftUI/UtilityHub/stock_docs_india_sample/metadata/announcements.jsonl",
+  "metadata_csv": "/Users/utkarshmishra/Desktop/Learn_SwiftUI/UtilityHub/stock_docs_india_sample/metadata/announcements.csv"
+}

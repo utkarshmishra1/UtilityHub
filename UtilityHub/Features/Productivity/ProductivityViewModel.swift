@@ -1,0 +1,176 @@
+//
+//  ProductivityViewModel.swift
+//  UtilityHub
+//
+//  Created by Codex on 26/02/26.
+//
+
+import Foundation
+import SwiftData
+import Combine
+
+@MainActor
+final class ProductivityViewModel: ObservableObject {
+    struct DayProductivity: Identifiable {
+        let id = UUID()
+        let label: String
+        let score: Int
+    }
+
+    struct HabitSummary {
+        var completedToday: Int = 0
+        var total: Int = 0
+        var longestStreak: Int = 0
+    }
+
+    @Published var taskFilter: TaskFilter = .all
+    @Published var tasks: [UHTask] = []
+    @Published var habits: [UHHabit] = []
+    @Published var habitSummary = HabitSummary()
+    @Published var weeklyScores: [DayProductivity] = []
+    @Published var focusRemainingSeconds: Int = 25 * 60
+    @Published var isFocusRunning = false
+
+    private let taskManager = TaskManager()
+    private let habitManager = HabitManager()
+    private let focusManager = FocusManager()
+    private let activityManager = ActivityManager()
+    private var timer: Timer?
+    private weak var focusContext: ModelContext?
+
+    deinit {
+        timer?.invalidate()
+    }
+
+    var filteredTasks: [UHTask] {
+        switch taskFilter {
+        case .all:
+            return tasks
+        case .pending:
+            return tasks.filter { !$0.isCompleted }
+        case .completed:
+            return tasks.filter(\.isCompleted)
+        }
+    }
+
+    var focusProgress: Double {
+        1 - (Double(focusRemainingSeconds) / Double(25 * 60))
+    }
+
+    func refresh(context: ModelContext) {
+        tasks = taskManager.fetchAll(context: context)
+        habits = habitManager.fetchAll(context: context)
+        let summary = habitManager.summary(context: context)
+        habitSummary = HabitSummary(
+            completedToday: summary.completed,
+            total: summary.total,
+            longestStreak: habitManager.longestStreak(context: context)
+        )
+        weeklyScores = buildWeeklyScores(context: context)
+    }
+
+    func addTask(title: String, context: ModelContext) {
+        taskManager.create(title: title, dueDate: Date(), context: context)
+        activityManager.log("Added task \(title)", type: "task", context: context)
+        HapticService.tap()
+        refresh(context: context)
+    }
+
+    func toggleTask(_ task: UHTask, context: ModelContext) {
+        taskManager.toggle(task, context: context)
+        let action = task.isCompleted ? "Completed" : "Marked pending"
+        activityManager.log("\(action) \(task.title)", type: "task", context: context)
+        HapticService.tap()
+        refresh(context: context)
+    }
+
+    func deleteTask(_ task: UHTask, context: ModelContext) {
+        taskManager.delete(task, context: context)
+        activityManager.log("Deleted task \(task.title)", type: "task", context: context)
+        refresh(context: context)
+    }
+
+    func addHabit(title: String, context: ModelContext) {
+        habitManager.create(title: title, targetPerDay: 1, context: context)
+        activityManager.log("Added habit \(title)", type: "habit", context: context)
+        refresh(context: context)
+    }
+
+    func markHabitDone(_ habit: UHHabit, context: ModelContext) {
+        habitManager.markToday(habit, context: context)
+        activityManager.log("Completed habit \(habit.title)", type: "habit", context: context)
+        HapticService.success()
+        refresh(context: context)
+    }
+
+    func completionCountToday(for habit: UHHabit, context: ModelContext) -> Int {
+        habitManager.completionCountToday(for: habit, context: context)
+    }
+
+    func habitStreak(for habit: UHHabit, context: ModelContext) -> Int {
+        habitManager.streak(for: habit, context: context)
+    }
+
+    func startOrPauseFocus(context: ModelContext) {
+        if isFocusRunning {
+            stopFocus()
+            return
+        }
+
+        focusContext = context
+        isFocusRunning = true
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                self.tickFocus()
+            }
+        }
+    }
+
+    func resetFocus() {
+        stopFocus()
+        focusRemainingSeconds = 25 * 60
+    }
+
+    private func tickFocus() {
+        guard focusRemainingSeconds > 0 else {
+            completeFocusIfNeeded()
+            return
+        }
+        focusRemainingSeconds -= 1
+        if focusRemainingSeconds <= 0 {
+            completeFocusIfNeeded()
+        }
+    }
+
+    private func completeFocusIfNeeded() {
+        stopFocus()
+        guard let context = focusContext else { return }
+        focusManager.addSession(durationSeconds: 25 * 60, context: context)
+        activityManager.log("Completed Pomodoro session", type: "focus", context: context)
+        HapticService.success()
+    }
+
+    private func stopFocus() {
+        timer?.invalidate()
+        timer = nil
+        isFocusRunning = false
+    }
+
+    private func buildWeeklyScores(context: ModelContext) -> [DayProductivity] {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE"
+
+        return (0..<7).map { offset in
+            let date = calendar.date(byAdding: .day, value: -6 + offset, to: Date()) ?? Date()
+            let start = date.uhDayStart
+            let end = calendar.date(byAdding: .day, value: 1, to: start) ?? date
+            let activityCount = activityManager.count(from: start, to: end, context: context)
+            let taskCompletions = taskManager.completionCount(on: date, context: context)
+            let score = min(max((activityCount * 8) + (taskCompletions * 12), 10), 100)
+            return DayProductivity(label: formatter.string(from: date), score: score)
+        }
+    }
+}
