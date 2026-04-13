@@ -15,6 +15,7 @@ struct RootView: View {
     @State private var isUnlocked = false
     @State private var didBootstrap = false
     @State private var showStudentRoleSheet = false
+    @StateObject private var adMobService = AdMobService.shared
     @AppStorage("app_lock_enabled") private var appLockEnabled = false
     @AppStorage(AppPreferenceKeys.hasStudentRoleSelection) private var hasStudentRoleSelection = false
     @AppStorage(AppPreferenceKeys.isStudentModeEnabled) private var isStudentModeEnabled = true
@@ -60,12 +61,14 @@ struct RootView: View {
             didBootstrap = true
             DataBootstrapManager().seedIfNeeded(context: modelContext)
             await NotificationService.shared.requestPermissionIfNeeded()
+            await adMobService.prepareAdsIfNeeded()
             await refreshLockState()
             showStudentRoleSheet = !hasStudentRoleSelection
         }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task {
+                await adMobService.prepareAdsIfNeeded()
                 await refreshLockState()
             }
         }

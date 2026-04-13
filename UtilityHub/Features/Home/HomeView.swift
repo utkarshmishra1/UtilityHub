@@ -28,6 +28,7 @@ struct HomeView: View {
             ZStack {
                 ScrollView(showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: HubTheme.sectionSpacing) {
+                        adBannerSection
                         headerSection
                         quickActionsSection
                         snapshotSection
@@ -42,7 +43,7 @@ struct HomeView: View {
                     .padding(.top, 16)
                     .padding(.bottom, 28)
                 }
-                .background(Color(uiColor: .systemGroupedBackground))
+                .background(AmbientHubBackground())
 
                 if showTodoOverlay {
                     todoOverlay
@@ -76,6 +77,10 @@ struct HomeView: View {
                 }
             }
         }
+    }
+
+    private var adBannerSection: some View {
+        HomeTopBannerAdView()
     }
 
     private var headerSection: some View {

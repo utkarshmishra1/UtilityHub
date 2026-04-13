@@ -69,33 +69,25 @@ enum AppAccent: String, CaseIterable, Identifiable {
         }
     }
 
-    var gradient: LinearGradient {
+    var gradientColors: [Color] {
         switch self {
         case .indigo:
-            return LinearGradient(
-                colors: [Color(red: 0.43, green: 0.38, blue: 0.92), Color(red: 0.18, green: 0.52, blue: 0.93)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            return [Color(red: 0.43, green: 0.38, blue: 0.92), Color(red: 0.18, green: 0.52, blue: 0.93)]
         case .ocean:
-            return LinearGradient(
-                colors: [Color(red: 0.00, green: 0.61, blue: 0.78), Color(red: 0.22, green: 0.40, blue: 0.86)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            return [Color(red: 0.00, green: 0.61, blue: 0.78), Color(red: 0.22, green: 0.40, blue: 0.86)]
         case .emerald:
-            return LinearGradient(
-                colors: [Color(red: 0.13, green: 0.70, blue: 0.48), Color(red: 0.29, green: 0.51, blue: 0.90)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            return [Color(red: 0.13, green: 0.70, blue: 0.48), Color(red: 0.29, green: 0.51, blue: 0.90)]
         case .sunset:
-            return LinearGradient(
-                colors: [Color(red: 0.98, green: 0.58, blue: 0.30), Color(red: 0.89, green: 0.29, blue: 0.35)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+            return [Color(red: 0.98, green: 0.58, blue: 0.30), Color(red: 0.89, green: 0.29, blue: 0.35)]
         }
+    }
+
+    var gradient: LinearGradient {
+        LinearGradient(
+            colors: gradientColors,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
     }
 
     static var current: AppAccent {

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AppStartupView: View {
     @State private var showSplash = true
+    @StateObject private var adMobService = AdMobService.shared
 
     var body: some View {
         ZStack {
@@ -22,6 +23,10 @@ struct AppStartupView: View {
                     showSplash = false
                 }
             }
+        }
+        .task(id: showSplash) {
+            guard !showSplash else { return }
+            await adMobService.prepareAdsIfNeeded()
         }
     }
 }

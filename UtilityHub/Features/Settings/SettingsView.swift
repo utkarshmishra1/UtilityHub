@@ -11,11 +11,13 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel = SettingsViewModel()
+    @StateObject private var adMobService = AdMobService.shared
 
     @AppStorage("display_name") private var displayName = "User"
 
     @State private var draftName = ""
     @State private var showResetAlert = false
+    @State private var adPrivacyMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -28,10 +30,11 @@ struct SettingsView: View {
                 .padding(.horizontal, HubTheme.horizontalPadding)
                 .padding(.vertical, 12)
             }
-            .background(Color(uiColor: .systemGroupedBackground))
+            .background(AmbientHubBackground())
             .navigationTitle("Settings")
             .onAppear {
                 draftName = displayName
+                adMobService.refreshConsentState()
             }
             .alert("Reset all local data?", isPresented: $showResetAlert) {
                 Button("Cancel", role: .cancel) {}
@@ -87,6 +90,24 @@ struct SettingsView: View {
                     }
                     if let backupMessage = viewModel.backupMessage {
                         Text(backupMessage)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    if adMobService.isPrivacyOptionsRequired {
+                        Button("Manage Ad Privacy") {
+                            Task {
+                                do {
+                                    try await adMobService.presentPrivacyOptionsForm()
+                                    adPrivacyMessage = "Ad privacy settings updated."
+                                } catch {
+                                    adPrivacyMessage = "Couldn't open ad privacy settings right now."
+                                }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if let adPrivacyMessage {
+                        Text(adPrivacyMessage)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

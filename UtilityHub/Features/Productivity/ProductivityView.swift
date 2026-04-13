@@ -30,7 +30,7 @@ struct ProductivityView: View {
                     .padding(.vertical, 12)
                     .padding(.bottom, 80)
                 }
-                .background(Color(uiColor: .systemGroupedBackground))
+                .background(AmbientHubBackground())
                 .navigationTitle("Productivity")
                 .task {
                     viewModel.refresh(context: modelContext)
