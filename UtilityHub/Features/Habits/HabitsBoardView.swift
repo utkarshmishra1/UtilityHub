@@ -101,18 +101,16 @@ struct HabitsBoardView: View {
         let todayDone = viewModel.habits.filter { viewModel.didComplete($0, on: Date()) }.count
         let total = max(viewModel.habits.count, 1)
         let todayProgress = Double(todayDone) / Double(total)
-        let weeklyCompletion = viewModel.overallWeekCompletion()
-        let weeklyProgress = viewModel.overallWeekProgress()
-        let weeklyDaysLabel = weeklyCompletion.total > 0
-            ? "\(weeklyCompletion.completed)/\(weeklyCompletion.total)"
-            : "0"
+        let monthly = viewModel.monthlyPerfectDaysCompletion()
+        let monthlyProgress = viewModel.monthlyPerfectDaysProgress()
+        let monthlyDaysLabel = "\(monthly.completed)/\(monthly.total)"
 
         return HStack(spacing: 14) {
             HabitRadialProgressView(
-                progress: weeklyProgress,
+                progress: monthlyProgress,
                 lineWidth: 10,
-                tint: weeklyProgressColor(weeklyProgress),
-                label: weeklyDaysLabel,
+                tint: weeklyProgressColor(monthlyProgress),
+                label: monthlyDaysLabel,
                 subtitle: "DAYS"
             )
             .frame(width: 82, height: 82)
@@ -533,6 +531,8 @@ private struct HabitMonthDetailView: View {
     @ObservedObject var viewModel: HabitsBoardViewModel
     let habit: UHHabit
 
+    @State private var pendingEditDay: Date?
+
     private var color: Color {
         viewModel.color(for: habit)
     }
@@ -687,16 +687,27 @@ private struct HabitMonthDetailView: View {
 
     private var monthGrid: some View {
         let days = viewModel.monthGrid()
+        let today = Date().uhDayStart
         return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8) {
             ForEach(Array(days.enumerated()), id: \.offset) { _, day in
                 if let day {
                     let completed = viewModel.didComplete(habit, on: day)
+                    let streak = completed ? viewModel.streakLength(for: habit, endingOn: day) : 0
+                    let isFuture = day.uhDayStart > today
                     HabitMonthDayCell(
                         day: day,
                         completed: completed,
+                        streakLength: streak,
                         isToday: viewModel.isToday(day),
+                        isFuture: isFuture,
                         tint: color
                     )
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        guard !isFuture else { return }
+                        HapticService.tap()
+                        pendingEditDay = day
+                    }
                 } else {
                     Color.clear
                         .frame(height: 36)
@@ -708,6 +719,35 @@ private struct HabitMonthDetailView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color.white.opacity(0.06))
         )
+        .confirmationDialog(
+            pendingDialogTitle,
+            isPresented: Binding(
+                get: { pendingEditDay != nil },
+                set: { if !$0 { pendingEditDay = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let day = pendingEditDay {
+                let completed = viewModel.didComplete(habit, on: day)
+                Button(completed ? "Mark as Not Done" : "Mark as Completed",
+                       role: completed ? .destructive : nil) {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                        viewModel.setCompletion(!completed, for: habit, on: day, context: modelContext)
+                    }
+                    pendingEditDay = nil
+                }
+                Button("Cancel", role: .cancel) { pendingEditDay = nil }
+            }
+        }
+    }
+
+    private var pendingDialogTitle: String {
+        guard let day = pendingEditDay else { return "" }
+        let completed = viewModel.didComplete(habit, on: day)
+        let dayStr = day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+        return completed
+            ? "\(dayStr) is marked done. Remove it?"
+            : "Mark \(habit.title) as completed on \(dayStr)?"
     }
 
     private var streakSection: some View {
@@ -749,35 +789,75 @@ private struct HabitMonthDetailView: View {
 private struct HabitMonthDayCell: View {
     let day: Date
     let completed: Bool
+    let streakLength: Int
     let isToday: Bool
+    let isFuture: Bool
     let tint: Color
 
-    var body: some View {
-        Text(day.formatted(.dateTime.day()))
-            .font(.caption.weight(.semibold))
-            .foregroundColor(completed ? .black.opacity(0.82) : .white.opacity(0.85))
-            .frame(maxWidth: .infinity, minHeight: 36)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(
-                        completed
-                        ? LinearGradient(
-                            colors: [tint.opacity(0.90), tint.opacity(0.75)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        : LinearGradient(
-                            colors: [Color.white.opacity(0.08), Color.white.opacity(0.05)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(isToday ? Color.white.opacity(0.86) : Color.clear, lineWidth: 1.4)
-                    )
+    /// 0.0 = first day of a streak (darkest), 1.0 = 7+ days in a row (lightest).
+    private var intensity: Double {
+        guard streakLength > 0 else { return 0 }
+        return min(Double(streakLength - 1) / 6.0, 1.0)
+    }
+
+    private var fillGradient: LinearGradient {
+        if completed {
+            // Darker at streak start, lighter as the streak grows.
+            let lowOpacity = 0.38 + 0.52 * intensity   // 0.38 → 0.90
+            let highOpacity = 0.28 + 0.52 * intensity  // 0.28 → 0.80
+            return LinearGradient(
+                colors: [tint.opacity(lowOpacity), tint.opacity(highOpacity)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
             )
-            .shadow(color: completed ? tint.opacity(0.16) : .clear, radius: 6, x: 0, y: 4)
+        } else {
+            return LinearGradient(
+                colors: [Color.white.opacity(0.08), Color.white.opacity(0.05)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+    }
+
+    private var textColor: Color {
+        if !completed { return .white.opacity(isFuture ? 0.35 : 0.85) }
+        // Lighter fills → darker text for contrast; darker fills → white text.
+        return intensity > 0.55 ? .black.opacity(0.85) : .white.opacity(0.95)
+    }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Text(day.formatted(.dateTime.day()))
+                .font(.caption.weight(.semibold))
+                .foregroundColor(textColor)
+                .frame(maxWidth: .infinity, minHeight: 36)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(fillGradient)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.white.opacity(completed ? 0.10 * intensity : 0))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .stroke(isToday ? Color.white.opacity(0.86) : Color.clear, lineWidth: 1.4)
+                        )
+                )
+                .opacity(isFuture ? 0.55 : 1)
+
+            if completed && streakLength >= 2 {
+                Text("\(streakLength)")
+                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                    .foregroundColor(textColor.opacity(0.85))
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule().fill(Color.black.opacity(intensity > 0.55 ? 0.10 : 0.28))
+                    )
+                    .padding(3)
+            }
+        }
+        .shadow(color: completed ? tint.opacity(0.12 + 0.10 * intensity) : .clear, radius: 6, x: 0, y: 4)
     }
 }
 

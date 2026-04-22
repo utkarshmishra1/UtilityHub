@@ -60,6 +60,36 @@ final class HabitsBoardViewModel: ObservableObject {
         return Double(completion.completed) / Double(completion.total)
     }
 
+    /// Days in the current month where every habit was completed, over total days in the month.
+    func monthlyPerfectDaysCompletion() -> (completed: Int, total: Int) {
+        let calendar = Calendar.current
+        let today = Date().uhDayStart
+        guard let interval = calendar.dateInterval(of: .month, for: today),
+              let daysRange = calendar.range(of: .day, in: .month, for: today) else {
+            return (0, 0)
+        }
+        let totalDays = daysRange.count
+        guard !habits.isEmpty else { return (0, totalDays) }
+
+        var perfect = 0
+        var cursor = interval.start
+        while cursor < interval.end {
+            if cursor <= today {
+                let allDone = habits.allSatisfy { didComplete($0, on: cursor) }
+                if allDone { perfect += 1 }
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return (perfect, totalDays)
+    }
+
+    func monthlyPerfectDaysProgress() -> Double {
+        let c = monthlyPerfectDaysCompletion()
+        guard c.total > 0 else { return 0 }
+        return Double(c.completed) / Double(c.total)
+    }
+
     func refresh(context: ModelContext) {
         habits = habitManager.fetchAll(context: context)
         completionMap = Dictionary(
@@ -92,6 +122,31 @@ final class HabitsBoardViewModel: ObservableObject {
         activityManager.log(title, type: "habit", context: context)
         HapticService.tap()
         refresh(context: context)
+    }
+
+    func setCompletion(_ completed: Bool, for habit: UHHabit, on day: Date, context: ModelContext) {
+        habitManager.setCompleted(completed, for: habit, on: day, context: context)
+        let dayStr = day.formatted(date: .abbreviated, time: .omitted)
+        let title = completed
+            ? "Marked \(habit.title) done on \(dayStr)"
+            : "Cleared \(habit.title) on \(dayStr)"
+        activityManager.log(title, type: "habit", context: context)
+        HapticService.tap()
+        refresh(context: context)
+    }
+
+    /// Consecutive completed days ending on (and including) `day`. 0 if `day` itself is not completed.
+    func streakLength(for habit: UHHabit, endingOn day: Date) -> Int {
+        guard didComplete(habit, on: day) else { return 0 }
+        let calendar = Calendar.current
+        var count = 0
+        var cursor = day.uhDayStart
+        while didComplete(habit, on: cursor) {
+            count += 1
+            guard let prev = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = prev.uhDayStart
+        }
+        return count
     }
 
     func deleteHabit(_ habit: UHHabit, context: ModelContext) {
