@@ -44,6 +44,25 @@ struct AppSplashView: View {
                 .opacity(didAppear ? 1 : 0)
                 .animation(.spring(response: 0.55, dampingFraction: 0.85), value: didAppear)
                 .accessibilityHidden(true)
+
+            // App name
+            VStack {
+                Spacer()
+                Text("Orbyt")
+                    .font(.system(size: 38, weight: .bold, design: .rounded))
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [.white, .white.opacity(0.7)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .shadow(color: .cyan.opacity(0.5), radius: 12, x: 0, y: 0)
+                    .opacity(didAppear ? 1 : 0)
+                    .offset(y: didAppear ? 0 : 16)
+                    .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.15), value: didAppear)
+                    .padding(.bottom, 80)
+            }
         }
         .onAppear {
             didAppear = true

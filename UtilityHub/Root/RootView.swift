@@ -97,7 +97,7 @@ struct RootView: View {
             Image(systemName: "lock.shield")
                 .font(.system(size: 44))
                 .foregroundStyle(HubTheme.accentGradient)
-            Text("UtilityHub Locked")
+            Text("Orbyt Locked")
                 .font(.title3.bold())
             Button("Unlock with Face ID") {
                 Task {
@@ -124,7 +124,7 @@ struct RootView: View {
     }
 
     private func authenticate() async {
-        let unlocked = await BiometricAuthService.shared.authenticate(reason: "Unlock UtilityHub")
+        let unlocked = await BiometricAuthService.shared.authenticate(reason: "Unlock Orbyt")
         await MainActor.run {
             isUnlocked = unlocked
         }

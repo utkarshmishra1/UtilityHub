@@ -154,7 +154,7 @@ struct BackupManager {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(payload)
 
-        let fileName = "UtilityHubBackup-\(Date().uhBackupFileStamp).json"
+        let fileName = "OrbytBackup-\(Date().uhBackupFileStamp).json"
         let documentsDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first ?? URL(fileURLWithPath: NSTemporaryDirectory())
         let fileURL = documentsDirectory.appendingPathComponent(fileName)
         try data.write(to: fileURL, options: .atomic)

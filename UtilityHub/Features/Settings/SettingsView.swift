@@ -125,7 +125,7 @@ struct SettingsView: View {
             HubSectionHeader(title: "About")
             HubCard {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("UtilityHub")
+                    Text("Orbyt")
                         .font(.headline.weight(.semibold))
                     Text("Offline-first daily control center built with SwiftUI + SwiftData.")
                         .font(.footnote)
