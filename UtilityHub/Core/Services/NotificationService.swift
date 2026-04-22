@@ -19,6 +19,53 @@ final class NotificationService {
         _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
     }
 
+    /// Returns true if alerts are currently authorised (prompts first if never asked).
+    @discardableResult
+    func ensurePermission() async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            let granted = (try? await center.requestAuthorization(options: [.alert, .sound, .badge])) ?? false
+            return granted
+        case .authorized, .provisional, .ephemeral:
+            return true
+        default:
+            return false
+        }
+    }
+
+    func scheduleTaskReminder(id: UUID, title: String, fireAt: Date) {
+        guard fireAt > Date() else { return }
+        var components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireAt)
+        components.second = 0
+
+        let content = UNMutableNotificationContent()
+        content.title = "Task reminder"
+        content.body = title
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        let request = UNNotificationRequest(
+            identifier: taskNotificationID(for: id),
+            content: content,
+            trigger: trigger
+        )
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [taskNotificationID(for: id)])
+        center.add(request)
+    }
+
+    func cancelTaskReminder(for taskID: UUID) {
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: [taskNotificationID(for: taskID)])
+    }
+
+    private func taskNotificationID(for taskID: UUID) -> String {
+        "task-reminder-\(taskID.uuidString)"
+    }
+
     func scheduleBillReminder(for bill: UHBill) {
         let reminderDate = Calendar.current.date(byAdding: .day, value: -1, to: bill.dueDate) ?? bill.dueDate
         guard reminderDate > Date() else { return }

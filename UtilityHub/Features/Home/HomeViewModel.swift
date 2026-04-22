@@ -122,10 +122,13 @@ final class HomeViewModel: ObservableObject {
         refresh(context: context)
     }
 
-    func addTodo(title: String, context: ModelContext) {
+    func addTodo(title: String, reminderAt: Date? = nil, context: ModelContext) {
         let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
-        taskManager.create(title: cleaned, category: "ToDo", dueDate: Date(), context: context)
+        let task = taskManager.create(title: cleaned, category: "ToDo", dueDate: Date(), reminderAt: reminderAt, context: context)
+        if let reminderAt {
+            NotificationService.shared.scheduleTaskReminder(id: task.id, title: cleaned, fireAt: reminderAt)
+        }
         activityManager.log("Added todo \(cleaned)", type: "task", context: context)
         HapticService.tap()
         refresh(context: context)
@@ -133,6 +136,11 @@ final class HomeViewModel: ObservableObject {
 
     func toggleTodo(_ task: UHTask, context: ModelContext) {
         taskManager.toggle(task, context: context)
+        if task.isCompleted {
+            NotificationService.shared.cancelTaskReminder(for: task.id)
+        } else if let reminderAt = task.reminderAt, reminderAt > Date() {
+            NotificationService.shared.scheduleTaskReminder(id: task.id, title: task.title, fireAt: reminderAt)
+        }
         let action = task.isCompleted ? "Completed todo" : "Marked todo pending"
         activityManager.log("\(action) \(task.title)", type: "task", context: context)
         HapticService.tap()
@@ -140,9 +148,23 @@ final class HomeViewModel: ObservableObject {
     }
 
     func deleteTodo(_ task: UHTask, context: ModelContext) {
+        NotificationService.shared.cancelTaskReminder(for: task.id)
         taskManager.delete(task, context: context)
         activityManager.log("Deleted todo \(task.title)", type: "task", context: context)
         HapticService.warning()
+        refresh(context: context)
+    }
+
+    func updateReminder(_ date: Date?, for task: UHTask, context: ModelContext) {
+        taskManager.setReminder(date, for: task, context: context)
+        if let date, date > Date() {
+            NotificationService.shared.scheduleTaskReminder(id: task.id, title: task.title, fireAt: date)
+        } else {
+            NotificationService.shared.cancelTaskReminder(for: task.id)
+        }
+        let label = date == nil ? "Removed reminder for \(task.title)" : "Set reminder for \(task.title)"
+        activityManager.log(label, type: "task", context: context)
+        HapticService.tap()
         refresh(context: context)
     }
 

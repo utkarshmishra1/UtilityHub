@@ -18,6 +18,7 @@ final class UHTask {
     var dueDate: Date?
     var createdAt: Date
     var completedAt: Date?
+    var reminderAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -27,7 +28,8 @@ final class UHTask {
         isCompleted: Bool = false,
         dueDate: Date? = nil,
         createdAt: Date = Date(),
-        completedAt: Date? = nil
+        completedAt: Date? = nil,
+        reminderAt: Date? = nil
     ) {
         self.id = id
         self.title = title
@@ -37,6 +39,7 @@ final class UHTask {
         self.dueDate = dueDate
         self.createdAt = createdAt
         self.completedAt = completedAt
+        self.reminderAt = reminderAt
     }
 }
 

@@ -21,6 +21,7 @@ struct HomeView: View {
     @State private var showTodoOverlay = false
     @State private var todoInput = ""
     @State private var todoFilter: TodoOverlayFilter = .all
+    @State private var editingReminderTask: UHTask?
     @FocusState private var isTodoInputFocused: Bool
 
     var body: some View {
@@ -75,6 +76,20 @@ struct HomeView: View {
                 if !isPresented {
                     viewModel.refresh(context: modelContext)
                 }
+            }
+            .sheet(item: $editingReminderTask) { task in
+                TaskReminderSheet(
+                    mode: .edit(title: task.title),
+                    initialTitle: task.title,
+                    initialReminder: task.reminderAt
+                ) { _, reminder in
+                    viewModel.updateReminder(reminder, for: task, context: modelContext)
+                    editingReminderTask = nil
+                } onCancel: {
+                    editingReminderTask = nil
+                }
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
         }
     }
@@ -605,6 +620,22 @@ struct HomeView: View {
 
             Spacer()
 
+            if !task.isCompleted {
+                Button {
+                    editingReminderTask = task
+                } label: {
+                    Image(systemName: task.reminderAt == nil ? "bell" : "bell.badge.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(task.reminderAt == nil ? Color.secondary : AppAccent.current.tintColor)
+                        .frame(width: 26, height: 26)
+                        .background(
+                            Circle()
+                                .fill((task.reminderAt == nil ? Color.secondary : AppAccent.current.tintColor).opacity(0.12))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+
             Text(task.isCompleted ? "Done" : "Pending")
                 .font(.caption2.weight(.bold))
                 .foregroundColor(task.isCompleted ? .green : .orange)
@@ -826,18 +857,41 @@ struct HomeView: View {
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .font(.subheadline.weight(.semibold))
                     .strikethrough(task.isCompleted)
                     .foregroundColor(task.isCompleted ? .secondary : .primary)
                     .lineLimit(2)
-                Text(task.isCompleted ? "Completed" : "Pending")
-                    .font(.caption2.weight(.medium))
-                    .foregroundColor(task.isCompleted ? .green : .orange)
+
+                HStack(spacing: 6) {
+                    Text(task.isCompleted ? "Completed" : "Pending")
+                        .font(.caption2.weight(.medium))
+                        .foregroundColor(task.isCompleted ? .green : .orange)
+
+                    if !task.isCompleted, let reminder = task.reminderAt {
+                        reminderInlineChip(for: reminder)
+                    }
+                }
             }
 
             Spacer()
+
+            if !task.isCompleted {
+                Button {
+                    editingReminderTask = task
+                } label: {
+                    Image(systemName: task.reminderAt == nil ? "bell" : "bell.badge.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(task.reminderAt == nil ? Color.secondary : AppAccent.current.tintColor)
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill((task.reminderAt == nil ? Color.secondary : AppAccent.current.tintColor).opacity(0.10))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
 
             Button(role: .destructive) {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -866,6 +920,31 @@ struct HomeView: View {
                 )
         )
         .opacity(task.isCompleted ? 0.86 : 1)
+    }
+
+    @ViewBuilder
+    private func reminderInlineChip(for date: Date) -> some View {
+        let fired = date <= Date()
+        let tint = fired ? Color.secondary : AppAccent.current.tintColor
+        HStack(spacing: 3) {
+            Image(systemName: fired ? "bell.slash.fill" : "bell.fill")
+                .font(.system(size: 8, weight: .bold))
+            Text(homeReminderLabel(date))
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundColor(tint)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Capsule(style: .continuous).fill(tint.opacity(0.14)))
+    }
+
+    private func homeReminderLabel(_ date: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return date.uhShortTime }
+        if cal.isDateInTomorrow(date) { return "Tmrw \(date.uhShortTime)" }
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f.string(from: date)
     }
 
     private func closeTodoOverlay() {

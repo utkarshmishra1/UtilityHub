@@ -14,8 +14,22 @@ struct TaskManager {
         return (try? context.fetch(descriptor)) ?? []
     }
 
-    func create(title: String, category: String = "General", dueDate: Date? = nil, context: ModelContext) {
-        context.insert(UHTask(title: title, category: category, dueDate: dueDate))
+    @discardableResult
+    func create(
+        title: String,
+        category: String = "General",
+        dueDate: Date? = nil,
+        reminderAt: Date? = nil,
+        context: ModelContext
+    ) -> UHTask {
+        let task = UHTask(title: title, category: category, dueDate: dueDate, reminderAt: reminderAt)
+        context.insert(task)
+        try? context.save()
+        return task
+    }
+
+    func setReminder(_ date: Date?, for task: UHTask, context: ModelContext) {
+        task.reminderAt = date
         try? context.save()
     }
 

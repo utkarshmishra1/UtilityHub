@@ -15,6 +15,7 @@ struct ProductivityView: View {
     @State private var showAddTaskSheet = false
     @State private var showHabitsBoard = false
     @State private var newTaskTitle = ""
+    @State private var editingReminderTask: UHTask?
 
     var body: some View {
         NavigationStack {
@@ -49,16 +50,35 @@ struct ProductivityView: View {
                 .padding(.trailing, 20)
                 .padding(.bottom, 10)
             }
-            .sheet(isPresented: $showAddTaskSheet) {
-                formSheet(
-                    title: "Add Task",
-                    placeholder: "Task title",
-                    text: $newTaskTitle
-                ) {
-                    viewModel.addTask(title: newTaskTitle, context: modelContext)
-                    newTaskTitle = ""
+            .sheet(isPresented: $showAddTaskSheet, onDismiss: { newTaskTitle = "" }) {
+                TaskReminderSheet(
+                    mode: .create,
+                    initialTitle: newTaskTitle,
+                    initialReminder: nil
+                ) { title, reminder in
+                    viewModel.addTask(title: title, reminderAt: reminder, context: modelContext)
                     showAddTaskSheet = false
+                    newTaskTitle = ""
+                } onCancel: {
+                    showAddTaskSheet = false
+                    newTaskTitle = ""
                 }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+            }
+            .sheet(item: $editingReminderTask) { task in
+                TaskReminderSheet(
+                    mode: .edit(title: task.title),
+                    initialTitle: task.title,
+                    initialReminder: task.reminderAt
+                ) { _, reminder in
+                    viewModel.updateReminder(reminder, for: task, context: modelContext)
+                    editingReminderTask = nil
+                } onCancel: {
+                    editingReminderTask = nil
+                }
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
             .navigationDestination(isPresented: $showHabitsBoard) {
                 HabitsBoardView()
@@ -100,7 +120,7 @@ struct ProductivityView: View {
     }
 
     private func taskRow(_ task: UHTask) -> some View {
-        HStack {
+        HStack(spacing: 10) {
             Button {
                 withAnimation(.easeInOut) {
                     viewModel.toggleTask(task, context: modelContext)
@@ -112,19 +132,27 @@ struct ProductivityView: View {
             }
             .buttonStyle(.plain)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(task.title)
                     .font(.subheadline.weight(.semibold))
                     .strikethrough(task.isCompleted)
                     .foregroundColor(task.isCompleted ? .secondary : .primary)
-                if let dueDate = task.dueDate {
-                    Text("Due \(dueDate.uhShortTime)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+
+                reminderChip(for: task)
             }
 
             Spacer()
+
+            if !task.isCompleted {
+                Button {
+                    editingReminderTask = task
+                } label: {
+                    Image(systemName: task.reminderAt == nil ? "bell" : "bell.badge.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(task.reminderAt == nil ? Color.secondary : AppAccent.current.tintColor)
+                }
+                .buttonStyle(.plain)
+            }
 
             Button {
                 withAnimation(.easeInOut) {
@@ -138,6 +166,60 @@ struct ProductivityView: View {
             .buttonStyle(.plain)
         }
         .opacity(task.isCompleted ? 0.74 : 1)
+        .contextMenu {
+            if !task.isCompleted {
+                Button {
+                    editingReminderTask = task
+                } label: {
+                    Label(task.reminderAt == nil ? "Set Reminder" : "Edit Reminder",
+                          systemImage: "bell.badge")
+                }
+                if task.reminderAt != nil {
+                    Button(role: .destructive) {
+                        viewModel.updateReminder(nil, for: task, context: modelContext)
+                    } label: {
+                        Label("Remove Reminder", systemImage: "bell.slash")
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func reminderChip(for task: UHTask) -> some View {
+        if !task.isCompleted, let reminder = task.reminderAt {
+            let fired = reminder <= Date()
+            HStack(spacing: 4) {
+                Image(systemName: fired ? "bell.slash.fill" : "bell.fill")
+                    .font(.system(size: 9, weight: .bold))
+                Text(reminderLabel(reminder))
+                    .font(.caption2.weight(.semibold))
+            }
+            .foregroundColor(fired ? .secondary : AppAccent.current.tintColor)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule(style: .continuous)
+                    .fill((fired ? Color.secondary : AppAccent.current.tintColor).opacity(0.14))
+            )
+        } else if let dueDate = task.dueDate {
+            Text("Added \(dueDate.uhShortTime)")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func reminderLabel(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return "Today \(date.uhShortTime)"
+        } else if calendar.isDateInTomorrow(date) {
+            return "Tomorrow \(date.uhShortTime)"
+        } else {
+            let f = DateFormatter()
+            f.dateFormat = "MMM d, h:mm a"
+            return f.string(from: date)
+        }
     }
 
     private var habitsSection: some View {
@@ -323,33 +405,8 @@ struct ProductivityView: View {
         return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    private func formSheet(
-        title: String,
-        placeholder: String,
-        text: Binding<String>,
-        onSave: @escaping () -> Void
-    ) -> some View {
-        NavigationStack {
-            Form {
-                TextField(placeholder, text: text)
-            }
-            .navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        showAddTaskSheet = false
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        onSave()
-                    }
-                    .disabled(text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-        }
-    }
 }
+
 
 private struct ProductivityHabitProgressSeal: View {
     let progress: Double
