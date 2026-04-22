@@ -84,28 +84,6 @@ final class HabitsBoardViewModel: ObservableObject {
         return (perfect, totalDays)
     }
 
-    struct DailyCompletion: Identifiable {
-        let id: Date
-        let date: Date
-        let completed: Int
-        let total: Int
-        var ratio: Double { total > 0 ? Double(completed) / Double(total) : 0 }
-    }
-
-    /// Per-day completion counts for the last `count` days (oldest → newest).
-    func dailyCompletionTrend(days count: Int = 14) -> [DailyCompletion] {
-        let calendar = Calendar.current
-        let today = Date().uhDayStart
-        let total = habits.count
-        return (0..<count).reversed().compactMap { offset in
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: today)?.uhDayStart else {
-                return nil
-            }
-            let done = habits.filter { didComplete($0, on: day) }.count
-            return DailyCompletion(id: day, date: day, completed: done, total: total)
-        }
-    }
-
     func monthlyPerfectDaysProgress() -> Double {
         let c = monthlyPerfectDaysCompletion()
         guard c.total > 0 else { return 0 }
