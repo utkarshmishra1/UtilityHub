@@ -14,6 +14,7 @@ struct HabitsBoardView: View {
     @State private var showAddHabitSheet = false
     @State private var newHabitTitle = ""
     @State private var didAnimateIn = false
+    @State private var didAnimateChart = false
     @State private var swipedHabitID: UUID?
     @State private var draggingHabitID: UUID?
     @State private var draggingOffset: CGFloat = 0
@@ -46,6 +47,8 @@ struct HabitsBoardView: View {
                                     )
                             }
                         }
+
+                        trendChartCard
                     }
                 }
                 .padding(.horizontal, 14)
@@ -73,6 +76,10 @@ struct HabitsBoardView: View {
             viewModel.refresh(context: modelContext)
             withAnimation(.spring(response: 0.44, dampingFraction: 0.84)) {
                 didAnimateIn = true
+            }
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            withAnimation(.spring(response: 0.9, dampingFraction: 0.78)) {
+                didAnimateChart = true
             }
         }
         .sheet(isPresented: $showAddHabitSheet, onDismiss: {
@@ -327,6 +334,80 @@ struct HabitsBoardView: View {
         .clipped()
     }
 
+    private var trendChartCard: some View {
+        let trend = viewModel.dailyCompletionTrend(days: 14)
+        let maxTotal = max(trend.map(\.total).max() ?? 1, 1)
+        let bestDay = trend.max(by: { $0.completed < $1.completed })
+        let totalCompletions = trend.reduce(0) { $0 + $1.completed }
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Last 14 Days")
+                        .font(.system(.headline, design: .rounded).weight(.bold))
+                        .foregroundColor(.white)
+                    Text("\(totalCompletions) completions · best day \(bestDay?.completed ?? 0)/\(maxTotal)")
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(.white.opacity(0.66))
+                }
+                Spacer(minLength: 0)
+                Text("Habits per day")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+
+            GeometryReader { proxy in
+                let slot = proxy.size.width / CGFloat(trend.count)
+                let barWidth = max(min(slot - 6, 22), 6)
+                HStack(alignment: .bottom, spacing: 0) {
+                    ForEach(Array(trend.enumerated()), id: \.element.id) { index, day in
+                        HabitTrendBar(
+                            day: day,
+                            maxTotal: maxTotal,
+                            barWidth: barWidth,
+                            animated: didAnimateChart,
+                            index: index
+                        )
+                        .frame(width: slot)
+                    }
+                }
+            }
+            .frame(height: 110)
+
+            HStack(spacing: 0) {
+                ForEach(Array(trend.enumerated()), id: \.element.id) { index, day in
+                    Text(shortWeekday(day.date))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundColor(.white.opacity(index == trend.count - 1 ? 0.95 : 0.55))
+                        .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.white.opacity(0.12), Color.white.opacity(0.06)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.22), radius: 12, x: 0, y: 8)
+        .padding(.top, 4)
+    }
+
+    private func shortWeekday(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "EEEEE"
+        return f.string(from: date)
+    }
+
     private var emptyState: some View {
         VStack(spacing: 10) {
             Image(systemName: "list.bullet.rectangle.portrait")
@@ -467,6 +548,70 @@ private struct HabitWeekMarkCell: View {
                 .foregroundColor(completed ? tint : .white.opacity(0.35))
         }
         .frame(width: size, height: size)
+    }
+}
+
+private struct HabitTrendBar: View {
+    let day: HabitsBoardViewModel.DailyCompletion
+    let maxTotal: Int
+    let barWidth: CGFloat
+    let animated: Bool
+    let index: Int
+
+    private var ratio: Double {
+        guard maxTotal > 0 else { return 0 }
+        return min(Double(day.completed) / Double(maxTotal), 1)
+    }
+
+    private var isToday: Bool {
+        Calendar.current.isDateInToday(day.date)
+    }
+
+    private var barColors: [Color] {
+        if ratio >= 0.999 {
+            return [Color(red: 0.40, green: 0.90, blue: 0.68), Color(red: 0.28, green: 0.78, blue: 0.90)]
+        } else if ratio >= 0.5 {
+            return [Color(red: 0.60, green: 0.78, blue: 1.0), Color(red: 0.48, green: 0.66, blue: 0.98)]
+        } else if ratio > 0 {
+            return [Color(red: 0.98, green: 0.72, blue: 0.46), Color(red: 0.96, green: 0.52, blue: 0.66)]
+        } else {
+            return [Color.white.opacity(0.18), Color.white.opacity(0.10)]
+        }
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            let fullHeight = proxy.size.height
+            let targetHeight = max(fullHeight * CGFloat(ratio), ratio > 0 ? 6 : 3)
+            let animatedHeight: CGFloat = animated ? targetHeight : (ratio > 0 ? 0 : 3)
+
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.white.opacity(0.06))
+                    .frame(width: barWidth, height: fullHeight)
+
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: barColors,
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .frame(width: barWidth, height: animatedHeight)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(isToday ? Color.white.opacity(0.9) : Color.clear, lineWidth: 1.2)
+                            .frame(width: barWidth, height: animatedHeight)
+                    )
+                    .animation(
+                        .spring(response: 0.7, dampingFraction: 0.78)
+                            .delay(Double(index) * 0.04),
+                        value: animated
+                    )
+            }
+            .frame(width: proxy.size.width, height: fullHeight, alignment: .bottom)
+        }
     }
 }
 
