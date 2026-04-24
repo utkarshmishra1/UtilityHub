@@ -14,21 +14,16 @@ import Combine
 final class HabitsBoardViewModel: ObservableObject {
     @Published var habits: [UHHabit] = []
     @Published var selectedHabit: UHHabit?
+    @Published var editingHabit: UHHabit?
     @Published var detailMonth: Date = Date().uhDayStart
+    @Published var globalStreak: Int = 0
+    @Published var totalCompleted: Int = 0
+    @Published var improvementPercent: Int = 0
 
     private let habitManager = HabitManager()
     private let activityManager = ActivityManager()
     private var completionMap: [UUID: Set<Date>] = [:]
     private var streakMap: [UUID: [HabitStreakRange]] = [:]
-    private let palette: [Color] = [
-        Color(red: 0.36, green: 0.76, blue: 1.0),
-        Color(red: 0.98, green: 0.56, blue: 0.74),
-        Color(red: 0.98, green: 0.82, blue: 0.44),
-        Color(red: 0.62, green: 0.72, blue: 1.0),
-        Color(red: 0.50, green: 0.89, blue: 0.64),
-        Color(red: 0.78, green: 0.66, blue: 1.0),
-        Color(red: 1.0, green: 0.69, blue: 0.51)
-    ]
 
     var weekDates: [Date] {
         let today = Date().uhDayStart
@@ -102,17 +97,55 @@ final class HabitsBoardViewModel: ObservableObject {
                 (habit.id, habitManager.bestStreaks(for: habit, context: context))
             }
         )
+        globalStreak = habitManager.currentGlobalStreak(context: context)
+        totalCompleted = habitManager.totalCompletionCount(context: context)
+        let weekly = habitManager.weekOverWeekCompletions(context: context)
+        if weekly.previous == 0 {
+            improvementPercent = weekly.current > 0 ? 100 : 0
+        } else {
+            let raw = (Double(weekly.current - weekly.previous) / Double(weekly.previous)) * 100
+            improvementPercent = Int(raw.rounded())
+        }
     }
 
     @discardableResult
-    func addHabit(title: String, context: ModelContext) -> Bool {
+    func addHabit(
+        title: String,
+        iconID: String? = nil,
+        colorHex: String? = nil,
+        context: ModelContext
+    ) -> Bool {
         let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return false }
-        habitManager.create(title: cleaned, targetPerDay: 1, context: context)
+        habitManager.create(
+            title: cleaned,
+            targetPerDay: 1,
+            iconID: iconID,
+            colorHex: colorHex,
+            context: context
+        )
         activityManager.log("Added habit \(cleaned)", type: "habit", context: context)
         HapticService.success()
         refresh(context: context)
         return true
+    }
+
+    func updateHabit(
+        _ habit: UHHabit,
+        title: String?,
+        iconID: String?,
+        colorHex: String?,
+        context: ModelContext
+    ) {
+        habitManager.update(
+            habit,
+            title: title,
+            iconID: iconID,
+            colorHex: colorHex,
+            context: context
+        )
+        HapticService.tap()
+        refresh(context: context)
     }
 
     func toggleToday(for habit: UHHabit, context: ModelContext) {
@@ -163,18 +196,43 @@ final class HabitsBoardViewModel: ObservableObject {
         completionMap[habit.id]?.contains(day.uhDayStart) ?? false
     }
 
+    /// Count of habits completed on the given day.
+    func completionsOnDay(_ day: Date) -> Int {
+        let start = day.uhDayStart
+        return completionMap.values.reduce(0) { $0 + ($1.contains(start) ? 1 : 0) }
+    }
+
     func isToday(_ day: Date) -> Bool {
         Calendar.current.isDateInToday(day)
     }
 
     func color(for habit: UHHabit) -> Color {
-        let seed = abs(habit.id.uuidString.hashValue)
-        return palette[seed % palette.count]
+        if let hex = habit.colorHex {
+            return HabitSwatchCatalog.color(for: hex)
+        }
+        return HabitSwatchCatalog.fallback(seededBy: habit.id).color
+    }
+
+    func swatchHex(for habit: UHHabit) -> String {
+        if let hex = habit.colorHex { return hex }
+        return HabitSwatchCatalog.fallback(seededBy: habit.id).hex
+    }
+
+    func icon(for habit: UHHabit) -> HabitIcon {
+        HabitIconCatalog.icon(for: habit.iconID)
     }
 
     func openDetail(for habit: UHHabit) {
         detailMonth = Date().uhDayStart
         selectedHabit = habit
+    }
+
+    func openEditor(for habit: UHHabit) {
+        editingHabit = habit
+    }
+
+    func closeEditor() {
+        editingHabit = nil
     }
 
     func closeDetail() {

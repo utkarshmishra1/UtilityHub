@@ -12,30 +12,31 @@ struct HabitsBoardView: View {
     @Environment(\.modelContext) private var modelContext
     @StateObject private var viewModel = HabitsBoardViewModel()
     @State private var showAddHabitSheet = false
-    @State private var newHabitTitle = ""
     @State private var didAnimateIn = false
     @State private var swipedHabitID: UUID?
     @State private var draggingHabitID: UUID?
     @State private var draggingOffset: CGFloat = 0
+    @State private var animatedWeeklyProgress: Double = 0
 
-    private let habitColumnWidth: CGFloat = 108
-    private let dayCellSize: CGFloat = 30
     private let daySpacing: CGFloat = 6
     private let swipeDeleteWidth: CGFloat = 86
+    private let rowDotCount: Int = 6
+    private let dayColumnWidth: CGFloat = 34
 
     var body: some View {
         ZStack {
             habitsBackdrop
 
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 14) {
-                    overviewCard
-                    weekHeader
+                VStack(spacing: 16) {
+                    heroCard
 
                     if viewModel.habits.isEmpty {
                         emptyState
                     } else {
-                        LazyVStack(spacing: 10) {
+                        habitsSectionHeader
+                        weekDayHeader
+                        LazyVStack(spacing: 11) {
                             ForEach(Array(viewModel.habits.enumerated()), id: \.element.id) { index, habit in
                                 habitRow(habit)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -46,18 +47,21 @@ struct HabitsBoardView: View {
                                     )
                             }
                         }
+
+                        heatmapCard
+                            .padding(.top, 6)
                     }
+
                 }
                 .padding(.horizontal, 14)
                 .padding(.top, 10)
-                .padding(.bottom, 20)
+                .padding(.bottom, 24)
             }
         }
         .navigationTitle("Habits")
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Button {
-                    newHabitTitle = ""
                     showAddHabitSheet = true
                 } label: {
                     Image(systemName: "plus")
@@ -66,93 +70,574 @@ struct HabitsBoardView: View {
                 .foregroundColor(.white)
             }
         }
-        .toolbarBackground(Color.black.opacity(0.92), for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .toolbar(.visible, for: .navigationBar)
         .task {
             viewModel.refresh(context: modelContext)
             withAnimation(.spring(response: 0.44, dampingFraction: 0.84)) {
                 didAnimateIn = true
             }
+            animatedWeeklyProgress = 0
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            animatedWeeklyProgress = viewModel.overallWeekProgress()
         }
-        .sheet(isPresented: $showAddHabitSheet, onDismiss: {
-            newHabitTitle = ""
-        }) {
-            HabitCreateSheet(title: $newHabitTitle) {
-                if viewModel.addHabit(title: newHabitTitle, context: modelContext) {
-                    newHabitTitle = ""
-                    showAddHabitSheet = false
-                }
+        .onChange(of: viewModel.totalCompleted) { _, _ in
+            animatedWeeklyProgress = viewModel.overallWeekProgress()
+        }
+        .sheet(isPresented: $showAddHabitSheet) {
+            HabitEditorSheet(mode: .create) { title, iconID, hex in
+                _ = viewModel.addHabit(
+                    title: title,
+                    iconID: iconID,
+                    colorHex: hex,
+                    context: modelContext
+                )
+                showAddHabitSheet = false
             }
-            .presentationDetents([.fraction(0.32)])
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $viewModel.editingHabit) { habit in
+            HabitEditorSheet(
+                mode: .edit(
+                    initialTitle: habit.title,
+                    initialIconID: viewModel.icon(for: habit).id,
+                    initialHex: viewModel.swatchHex(for: habit)
+                )
+            ) { title, iconID, hex in
+                viewModel.updateHabit(
+                    habit,
+                    title: title,
+                    iconID: iconID,
+                    colorHex: hex,
+                    context: modelContext
+                )
+                viewModel.closeEditor()
+            }
+            .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
         .sheet(item: $viewModel.selectedHabit) { habit in
             HabitMonthDetailView(viewModel: viewModel, habit: habit)
         }
-        .onAppear {
-            if newHabitTitle.isEmpty == false {
-                newHabitTitle = ""
+    }
+
+    private var heroCard: some View {
+        let todayDone = viewModel.habits.filter { viewModel.didComplete($0, on: Date()) }.count
+        let totalHabits = viewModel.habits.count
+        let weeklyProgress = viewModel.overallWeekProgress()
+        let weeklyPercent = Int((weeklyProgress * 100).rounded())
+        let weeklyTint = weeklyProgressColor(weeklyProgress)
+        let streak = viewModel.globalStreak
+        let improvement = viewModel.improvementPercent
+        
+        return VStack(alignment: .leading, spacing: 16) {
+            Text("Stay consistent, see the results.")
+                .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                .foregroundColor(.white.opacity(0.72))
+
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 1.0, green: 0.58, blue: 0.21).opacity(0.30),
+                                            Color(red: 1.0, green: 0.35, blue: 0.13).opacity(0.18)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 54, height: 54)
+                            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                                let t = context.date.timeIntervalSinceReferenceDate
+                                let scaleY = 1.0 + 0.07 * sin(t * 3.2)
+                                let scaleX = 1.0 + 0.04 * sin(t * 2.4 + 1.3)
+                                let rotation = 3.0 * sin(t * 2.1 + 0.6)
+                                let offsetY = -1.2 + 1.2 * sin(t * 3.7)
+                                Image(systemName: "flame.fill")
+                                    .font(.system(size: 26, weight: .bold))
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: [Color(red: 1.0, green: 0.72, blue: 0.32), Color(red: 1.0, green: 0.38, blue: 0.18)],
+                                            startPoint: .top,
+                                            endPoint: .bottom
+                                        )
+                                    )
+                                    .scaleEffect(x: scaleX, y: scaleY, anchor: .bottom)
+                                    .rotationEffect(.degrees(rotation), anchor: .bottom)
+                                    .offset(y: offsetY)
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 6) {
+                                Text("\(streak)")
+                                    .font(.system(.title2, design: .rounded).weight(.heavy))
+                                    .foregroundColor(.white)
+                                Text("Day Streak")
+                                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                                    .foregroundStyle(
+                                        LinearGradient(
+                                            colors: [Color(red: 1.0, green: 0.78, blue: 0.36), Color(red: 1.0, green: 0.55, blue: 0.26)],
+                                            startPoint: .leading,
+                                            endPoint: .trailing
+                                        )
+                                    )
+                            }
+                            Text(streakMessage(for: streak))
+                                .font(.caption.weight(.medium))
+                                .foregroundColor(.white.opacity(0.70))
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+
+                    streakTrail
+                }
+
+                Spacer(minLength: 0)
+
+                weeklyProgressRing(progress: weeklyProgress, percent: weeklyPercent)
+                    .frame(width: 132, height: 132)
+//                    .offset(x: -28, y: -10)
+            }
+
+            HStack(spacing: 10) {
+                HeroMetricChip(
+                    icon: "checkmark.circle.fill",
+                    tint: Color(red: 0.68, green: 0.42, blue: 1.0),
+                    value: "\(todayDone)/\(totalHabits)",
+                    label: "Done Today"
+                )
+                HeroMetricChip(
+                    icon: "chart.line.uptrend.xyaxis",
+                    tint: Color(red: 0.30, green: 0.88, blue: 0.55),
+                    value: improvementValueLabel(viewModel.improvementPercent),
+                    label: "Improvement"
+                )
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.13, green: 0.15, blue: 0.22),
+                            Color(red: 0.09, green: 0.11, blue: 0.18)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                )
+        )
+        .shadow(color: .black.opacity(0.32), radius: 18, x: 0, y: 12)
+    }
+
+    private var streakTrail: some View {
+        let trailDays = Array(viewModel.weekDates.reversed().suffix(6))
+        return HStack(spacing: 6) {
+            ForEach(trailDays, id: \.self) { day in
+                let anyDone = viewModel.habits.contains { viewModel.didComplete($0, on: day) }
+                Capsule(style: .continuous)
+                    .fill(
+                        anyDone
+                        ? LinearGradient(
+                            colors: [Color(red: 1.0, green: 0.72, blue: 0.32), Color(red: 1.0, green: 0.48, blue: 0.22)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        : LinearGradient(
+                            colors: [Color.white.opacity(0.14), Color.white.opacity(0.10)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: 18, height: 6)
             }
         }
     }
 
-    private var overviewCard: some View {
-        let todayDone = viewModel.habits.filter { viewModel.didComplete($0, on: Date()) }.count
-        let total = max(viewModel.habits.count, 1)
-        let todayProgress = Double(todayDone) / Double(total)
-        let monthly = viewModel.monthlyPerfectDaysCompletion()
-        let monthlyProgress = viewModel.monthlyPerfectDaysProgress()
-        let monthlyDaysLabel = "\(monthly.completed)/\(monthly.total)"
-
-        return HStack(spacing: 14) {
-            HabitRadialProgressView(
-                progress: monthlyProgress,
-                lineWidth: 10,
-                tint: weeklyProgressColor(monthlyProgress),
-                label: monthlyDaysLabel,
-                subtitle: "DAYS"
-            )
-            .frame(width: 82, height: 82)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Weekly Momentum")
-                    .font(.system(.headline, design: .rounded).weight(.bold))
-                    .foregroundColor(.white)
-
-                Text("\(todayDone)/\(viewModel.habits.count) done today")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.white.opacity(0.88))
-
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule(style: .continuous)
-                            .fill(Color.white.opacity(0.14))
-                            .frame(height: 8)
-
-                        Capsule(style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [weeklyProgressColor(todayProgress).opacity(0.72), weeklyProgressColor(todayProgress)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
-                            )
-                            .frame(width: proxy.size.width * todayProgress, height: 8)
-                    }
+    private var habitsSectionHeader: some View {
+        HStack(alignment: .center) {
+            Text("Today's Habits")
+                .font(.system(.headline, design: .rounded).weight(.bold))
+                .foregroundColor(.white)
+            Spacer()
+            Button {
+                showAddHabitSheet = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                    Text("Add")
                 }
-                .frame(height: 8)
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(Color(red: 0.36, green: 0.72, blue: 1.0))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 2)
+    }
+
+    private var heatmapCard: some View {
+        let today = Date().uhDayStart
+        let weeks = 52
+        let calendar = Calendar.current
+        let weekdayOffset = (calendar.component(.weekday, from: today) - calendar.firstWeekday + 7) % 7
+        let daysAfterToday = 6 - weekdayOffset
+        let totalCells = weeks * 7
+        let startDate = calendar.date(byAdding: .day, value: -(totalCells - 1 - daysAfterToday), to: today)?.uhDayStart ?? today
+        let totalHabits = max(viewModel.habits.count, 1)
+
+        let windowCompletions = (0..<totalCells).reduce(0) { acc, idx in
+            guard let d = calendar.date(byAdding: .day, value: idx, to: startDate) else { return acc }
+            if d > today { return acc }
+            return acc + viewModel.completionsOnDay(d)
+        }
+
+        // Build month labels per column (show when month changes)
+        var monthLabels: [Int: String] = [:]
+        var lastMonth = -1
+        let monthSymbols = calendar.shortMonthSymbols
+        for week in 0..<weeks {
+            guard let colStart = calendar.date(byAdding: .day, value: week * 7, to: startDate) else { continue }
+            let month = calendar.component(.month, from: colStart)
+            if month != lastMonth {
+                monthLabels[week] = monthSymbols[month - 1]
+                lastMonth = month
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Activity")
+                        .font(.system(.headline, design: .rounded).weight(.bold))
+                        .foregroundColor(.white)
+                    Text("Last 12 months")
+                        .font(.caption.weight(.medium))
+                        .foregroundColor(.white.opacity(0.55))
+                }
+                Spacer()
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text("\(windowCompletions)")
+                        .font(.system(.title3, design: .rounded).weight(.heavy))
+                        .foregroundColor(.white)
+                    Text("check-ins")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+            }
+
+            HStack(alignment: .top, spacing: 6) {
+                VStack(spacing: 3) {
+                    Color.clear.frame(height: 12)
+                    ForEach(0..<7, id: \.self) { idx in
+                        Text(shortWeekdayLabel(forRowIndex: idx))
+                            .font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(idx % 2 == 1 ? 0.55 : 0.0))
+                            .frame(height: 12)
+                    }
+                }
+                .frame(width: 18)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ZStack(alignment: .topLeading) {
+                            HStack(spacing: 3) {
+                                ForEach(0..<weeks, id: \.self) { _ in
+                                    Color.clear.frame(width: 12, height: 12)
+                                }
+                            }
+                            ForEach(Array(monthLabels.keys.sorted()), id: \.self) { weekIdx in
+                                Text(monthLabels[weekIdx] ?? "")
+                                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                    .foregroundColor(.white.opacity(0.58))
+                                    .fixedSize()
+                                    .offset(x: CGFloat(weekIdx) * 15)
+                            }
+                        }
+                        .frame(height: 12)
+
+                        HStack(spacing: 3) {
+                            ForEach(0..<weeks, id: \.self) { week in
+                                VStack(spacing: 3) {
+                                    ForEach(0..<7, id: \.self) { day in
+                                        let idx = week * 7 + day
+                                        let cellDate = (calendar.date(byAdding: .day, value: idx, to: startDate) ?? startDate).uhDayStart
+                                        let isFuture = cellDate > today
+                                        let completions = isFuture ? 0 : viewModel.completionsOnDay(cellDate)
+                                        let intensity = isFuture ? -1.0 : Double(completions) / Double(totalHabits)
+                                        HeatCell(
+                                            intensity: intensity,
+                                            isToday: calendar.isDate(cellDate, inSameDayAs: today)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.trailing, 4)
+                }
+                .defaultScrollAnchor(.trailing)
+            }
+
+            HStack(spacing: 6) {
+                Spacer()
+                Text("Less")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.52))
+                ForEach(0..<5, id: \.self) { i in
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .fill(HabitsBoardView.heatmapColor(intensity: Double(i) / 4.0))
+                        .frame(width: 12, height: 12)
+                }
+                Text("More")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.52))
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.12, green: 0.14, blue: 0.22),
+                            Color(red: 0.08, green: 0.10, blue: 0.16)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+        )
+    }
+
+    private func shortWeekdayLabel(forRowIndex idx: Int) -> String {
+        let calendar = Calendar.current
+        let symbols = calendar.veryShortWeekdaySymbols
+        let first = calendar.firstWeekday - 1
+        return symbols[(idx + first) % symbols.count]
+    }
+
+    static func heatmapColor(intensity: Double) -> Color {
+        if intensity < 0 { return Color.white.opacity(0.03) }
+        if intensity <= 0.01 { return Color.white.opacity(0.08) }
+        if intensity <= 0.25 { return Color(red: 0.42, green: 0.38, blue: 0.90).opacity(0.42) }
+        if intensity <= 0.50 { return Color(red: 0.50, green: 0.42, blue: 0.95).opacity(0.62) }
+        if intensity <= 0.75 { return Color(red: 0.58, green: 0.44, blue: 1.00).opacity(0.82) }
+        return Color(red: 0.72, green: 0.48, blue: 1.0)
+    }
+
+    @ViewBuilder
+    private func weeklyProgressRing(progress: Double, percent: Int) -> some View {
+        let clamped = min(max(animatedWeeklyProgress, 0), 1)
+        let lineWidth: CGFloat = 14
+        let ringColors: [Color] = [
+            Color(red: 0.52, green: 0.84, blue: 1.00),
+            Color(red: 0.42, green: 0.60, blue: 1.00),
+            Color(red: 0.56, green: 0.44, blue: 0.98),
+            Color(red: 0.72, green: 0.52, blue: 1.00),
+            Color(red: 0.52, green: 0.84, blue: 1.00)
+        ]
+
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let breath = 0.5 + 0.5 * sin(t * 1.6)
+            let sparkleScale = 0.92 + 0.12 * (0.5 + 0.5 * sin(t * 2.2))
+
+            GeometryReader { geo in
+                let size = min(geo.size.width, geo.size.height)
+
+                ZStack {
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    Color(red: 0.55, green: 0.44, blue: 1.0).opacity(0.22 + 0.14 * breath),
+                                    Color.clear
+                                ],
+                                center: .center,
+                                startRadius: 4,
+                                endRadius: size * 0.62
+                            )
+                        )
+                        .blur(radius: 6)
+
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(0.16),
+                                            Color.white.opacity(0.02),
+                                            Color.black.opacity(0.18)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .blendMode(.plusLighter)
+                        )
+                        .overlay(
+                            Circle()
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(0.38),
+                                            Color.white.opacity(0.06),
+                                            Color.white.opacity(0.0)
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    ),
+                                    lineWidth: 1
+                                )
+                        )
+                        .padding(lineWidth / 2)
+
+                    Circle()
+                        .stroke(Color.white.opacity(0.07), lineWidth: lineWidth)
+
+                    Circle()
+                        .trim(from: 0, to: clamped)
+                        .stroke(
+                            AngularGradient(
+                                gradient: Gradient(colors: ringColors),
+                                center: .center
+                            ),
+                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                        )
+                        .rotationEffect(.degrees(-90))
+                        .shadow(color: Color(red: 0.54, green: 0.44, blue: 1.0).opacity(0.32 + 0.18 * breath),
+                                radius: 10 + 4 * breath, x: 0, y: 0)
+                        .animation(.spring(response: 1.0, dampingFraction: 0.72), value: animatedWeeklyProgress)
+
+                    VStack(spacing: 6) {
+                        Image(systemName: "sparkle")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.95), Color(red: 0.75, green: 0.60, blue: 1.0)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .scaleEffect(sparkleScale)
+                            .shadow(color: Color(red: 0.72, green: 0.56, blue: 1.0).opacity(0.45),
+                                    radius: 4, x: 0, y: 0)
+
+                        Text("\(percent)%")
+                            .font(.system(size: 30, weight: .heavy, design: .rounded))
+                            .foregroundColor(.white)
+                            .contentTransition(.numericText())
+
+                        Text("Weekly Score")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundColor(.white.opacity(0.62))
+                    }
+                }
+                .frame(width: size, height: size)
+            }
+        }
+    }
+
+    private func improvementValueLabel(_ percent: Int) -> String {
+        if percent > 0 { return "+\(percent)%" }
+        if percent < 0 { return "\(percent)%" }
+        return "0%"
+    }
+
+    private func streakMessage(for streak: Int) -> String {
+        switch streak {
+        case 0: return "Start today — every streak begins with one day."
+        case 1...2: return "Nice start! Keep the momentum going."
+        case 3...6: return "Keep going! You're doing great."
+        case 7...13: return "A full week — you're on fire."
+        default: return "Legendary streak. Don't break the chain."
+        }
+    }
+
+    private func habitRow(_ habit: UHHabit) -> some View {
+        let color = viewModel.color(for: habit)
+        let icon = viewModel.icon(for: habit)
+        let trailDays = Array(viewModel.weekDates.reversed().suffix(rowDotCount))
+        let todayDate = trailDays.last ?? Date().uhDayStart
+
+        let rowContent = HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [color.opacity(0.46), color.opacity(0.22)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                            .stroke(color.opacity(0.55), lineWidth: 0.9)
+                    )
+                Image(systemName: icon.systemName)
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(color)
+            }
+            .frame(width: 38, height: 38)
+
+            Text(habit.title)
+                .font(.system(.subheadline, design: .rounded).weight(.bold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+
+            Spacer(minLength: 6)
+
+            HStack(spacing: 0) {
+                ForEach(trailDays, id: \.self) { day in
+                    let completed = viewModel.didComplete(habit, on: day)
+                    let isToday = viewModel.isToday(day)
+                    Group {
+                        if isToday {
+                            Button {
+                                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                                    viewModel.toggleToday(for: habit, context: modelContext)
+                                }
+                            } label: {
+                                HabitDayDot(completed: completed, tint: color, isToday: true)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            HabitDayDot(completed: completed, tint: color, isToday: false)
+                        }
+                    }
+                    .frame(width: dayColumnWidth)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.15),
-                            Color.white.opacity(0.08)
+                            Color(red: 0.13, green: 0.16, blue: 0.22),
+                            Color(red: 0.09, green: 0.11, blue: 0.18)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -160,118 +645,7 @@ struct HabitsBoardView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.white.opacity(0.18), lineWidth: 1)
-                )
-        )
-        .shadow(color: .black.opacity(0.24), radius: 12, x: 0, y: 8)
-    }
-
-    private var weekHeader: some View {
-        let weekDates = viewModel.weekDates
-
-        return HStack(spacing: 8) {
-            Text("Habit")
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.white.opacity(0.72))
-                .frame(width: habitColumnWidth, alignment: .leading)
-
-            HStack(spacing: daySpacing) {
-                ForEach(weekDates, id: \.self) { day in
-                    VStack(spacing: 2) {
-                        Text(day.formatted(.dateTime.weekday(.abbreviated)).uppercased())
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundColor(.white.opacity(0.66))
-                        Text(day.formatted(.dateTime.day()))
-                            .font(.system(size: 12, weight: .semibold, design: .rounded))
-                            .foregroundColor(viewModel.isToday(day) ? .cyan : .white.opacity(0.82))
-                    }
-                    .frame(width: dayCellSize)
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                )
-        )
-    }
-
-    private func habitRow(_ habit: UHHabit) -> some View {
-        let color = viewModel.color(for: habit)
-        let weeklyProgress = viewModel.weeklyProgress(for: habit)
-        let completedDays = viewModel.weeklyCompletedDays(for: habit)
-        let weekDates = viewModel.weekDates
-
-        let rowContent = HStack(spacing: 8) {
-            HStack(spacing: 8) {
-                HabitRadialProgressView(
-                    progress: weeklyProgress,
-                    lineWidth: 3.4,
-                    tint: color,
-                    label: "\(completedDays)/\(weekDates.count)",
-                    subtitle: nil,
-                    showGlow: false,
-                    animated: false
-                )
-                .frame(width: 24, height: 24)
-
-                Text(habit.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.white.opacity(0.95))
-                    .lineLimit(1)
-            }
-            .frame(width: habitColumnWidth, alignment: .leading)
-
-            HStack(spacing: daySpacing) {
-                ForEach(weekDates, id: \.self) { day in
-                    let completed = viewModel.didComplete(habit, on: day)
-                    if viewModel.isToday(day) {
-                        Button {
-                            withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
-                                viewModel.toggleToday(for: habit, context: modelContext)
-                            }
-                        } label: {
-                            HabitWeekMarkCell(
-                                completed: completed,
-                                isToday: true,
-                                tint: color,
-                                size: dayCellSize
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        HabitWeekMarkCell(
-                            completed: completed,
-                            isToday: false,
-                            tint: color,
-                            size: dayCellSize
-                        )
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 11)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            color.opacity(0.12),
-                            Color.white.opacity(0.07)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(color.opacity(0.30), lineWidth: 0.9)
+                        .stroke(color.opacity(0.22), lineWidth: 1)
                 )
         )
         .contentShape(Rectangle())
@@ -289,12 +663,37 @@ struct HabitsBoardView: View {
                 viewModel.openDetail(for: habit)
             }
         }
+        .contextMenu {
+            Button {
+                withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) {
+                    viewModel.toggleToday(for: habit, context: modelContext)
+                }
+            } label: {
+                Label(
+                    viewModel.didComplete(habit, on: todayDate) ? "Undo Today" : "Mark Today",
+                    systemImage: "checkmark.circle.fill"
+                )
+            }
+            Button {
+                viewModel.openEditor(for: habit)
+            } label: {
+                Label("Edit Habit", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                    closeSwipeState()
+                    viewModel.deleteHabit(habit, context: modelContext)
+                }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
 
         return ZStack(alignment: .trailing) {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(Color.red.opacity(0.2))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(Color.red.opacity(0.38), lineWidth: 1)
                 )
 
@@ -311,9 +710,9 @@ struct HabitsBoardView: View {
                         .font(.caption2.weight(.bold))
                 }
                 .foregroundColor(.white)
-                .frame(width: swipeDeleteWidth - 6, height: 56)
+                .frame(width: swipeDeleteWidth - 6, height: 60)
                 .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(Color.red.opacity(0.75))
                 )
             }
@@ -325,6 +724,58 @@ struct HabitsBoardView: View {
             rowContent
         }
         .clipped()
+    }
+
+    private var weekDayHeader: some View {
+        let trailDays = Array(viewModel.weekDates.reversed().suffix(rowDotCount))
+        return HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            ForEach(trailDays, id: \.self) { day in
+                let isToday = viewModel.isToday(day)
+                VStack(spacing: 2) {
+                    Text(weekdayShortLabel(day))
+                        .font(.system(size: 10, weight: .bold, design: .rounded))
+                        .foregroundColor(.white.opacity(isToday ? 0.85 : 0.5))
+                        .tracking(0.6)
+                    Text(dayNumberLabel(day))
+                        .font(.system(size: 13, weight: .heavy, design: .rounded))
+                        .foregroundColor(
+                            isToday
+                            ? Color(red: 0.36, green: 0.72, blue: 1.0)
+                            : .white.opacity(0.85)
+                        )
+                }
+                .frame(width: dayColumnWidth)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+    }
+
+    private func weekdayShortLabel(_ day: Date) -> String {
+        day.formatted(.dateTime.weekday(.abbreviated)).uppercased()
+    }
+
+    private func dayNumberLabel(_ day: Date) -> String {
+        day.formatted(.dateTime.day())
+    }
+
+    private func habitStreakLength(for habit: UHHabit) -> Int {
+        var cursor = Date().uhDayStart
+        if !viewModel.didComplete(habit, on: cursor) {
+            if let prev = Calendar.current.date(byAdding: .day, value: -1, to: cursor)?.uhDayStart {
+                cursor = prev
+            }
+        }
+        return viewModel.streakLength(for: habit, endingOn: cursor)
+    }
+
+    private func streakLabel(for habit: UHHabit, streak: Int, days: [Date]) -> String {
+        let allHit = !days.isEmpty && days.allSatisfy { viewModel.didComplete(habit, on: $0) }
+        if allHit { return "Perfect Week! 🔥" }
+        if streak <= 0 { return "Start today" }
+        if streak == 1 { return "1 day streak" }
+        return "\(streak) day streak"
     }
 
     private var emptyState: some View {
@@ -444,29 +895,103 @@ struct HabitsBoardView: View {
     }
 }
 
-private struct HabitWeekMarkCell: View {
-    let completed: Bool
+private struct HeatCell: View {
+    let intensity: Double
     let isToday: Bool
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+            .fill(HabitsBoardView.heatmapColor(intensity: intensity))
+            .frame(width: 12, height: 12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                    .stroke(isToday ? Color.white.opacity(0.85) : Color.clear, lineWidth: 1.1)
+            )
+    }
+}
+
+private struct HabitDayDot: View {
+    let completed: Bool
     let tint: Color
-    let size: CGFloat
+    let isToday: Bool
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(completed ? tint.opacity(0.34) : Color.white.opacity(0.06))
+            Circle()
+                .fill(
+                    completed
+                    ? LinearGradient(
+                        colors: [tint.opacity(0.95), tint.opacity(0.75)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                    : LinearGradient(
+                        colors: [Color.white.opacity(0.08), Color.white.opacity(0.05)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    Circle()
                         .stroke(
-                            isToday ? tint.opacity(0.95) : Color.white.opacity(0.09),
-                            lineWidth: isToday ? 1.3 : 1
+                            completed
+                            ? Color.white.opacity(0.18)
+                            : (isToday ? tint.opacity(0.85) : Color.white.opacity(0.16)),
+                            lineWidth: isToday && !completed ? 1.3 : 1
                         )
                 )
+                .shadow(color: completed ? tint.opacity(0.35) : .clear, radius: 6, x: 0, y: 3)
 
-            Image(systemName: completed ? "checkmark" : "minus")
-                .font(.system(size: max(size * 0.34, 9), weight: .bold))
-                .foregroundColor(completed ? tint : .white.opacity(0.35))
+            if completed {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 13, weight: .black))
+                    .foregroundColor(.white)
+                    .shadow(color: .black.opacity(0.22), radius: 0.5, x: 0, y: 0.5)
+            }
         }
-        .frame(width: size, height: size)
+        .frame(width: 24, height: 24)
+    }
+}
+
+private struct HeroMetricChip: View {
+    let icon: String
+    let tint: Color
+    let value: String
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(tint.opacity(0.20))
+                    .frame(width: 30, height: 30)
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(tint)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value)
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundColor(.white.opacity(0.64))
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.white.opacity(0.06))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.09), lineWidth: 1)
+                )
+        )
     }
 }
 
@@ -910,148 +1435,328 @@ private struct HabitStreakRow: View {
     }
 }
 
-private struct HabitCreateSheet: View {
-    @Binding var title: String
-    let onSave: () -> Void
+enum HabitEditorMode {
+    case create
+    case edit(initialTitle: String, initialIconID: String, initialHex: String)
+
+    var navigationTitle: String {
+        switch self {
+        case .create: return "Create Habit"
+        case .edit: return "Edit Habit"
+        }
+    }
+
+    var primaryButtonTitle: String {
+        switch self {
+        case .create: return "Save"
+        case .edit: return "Update"
+        }
+    }
+}
+
+struct HabitEditorSheet: View {
+    let mode: HabitEditorMode
+    let onSave: (_ title: String, _ iconID: String, _ colorHex: String) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @FocusState private var isTitleFocused: Bool
+    @State private var title: String = ""
+    @State private var selectedIconID: String = HabitIconCatalog.fallback.id
+    @State private var selectedHex: String = HabitSwatchCatalog.fallback.hex
+
+    private let iconColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 6)
+    private let swatchColumns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 5)
+
+    private var selectedColor: Color {
+        HabitSwatchCatalog.color(for: selectedHex)
+    }
+
+    private var selectedIcon: HabitIcon {
+        HabitIconCatalog.icon(for: selectedIconID)
+    }
+
+    private var trimmedTitle: String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 LinearGradient(
                     colors: [
-                        Color(red: 0.08, green: 0.10, blue: 0.14),
-                        Color(red: 0.11, green: 0.13, blue: 0.18)
+                        Color(red: 0.07, green: 0.09, blue: 0.14),
+                        Color(red: 0.11, green: 0.13, blue: 0.20),
+                        Color(red: 0.08, green: 0.10, blue: 0.16)
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
                 )
                 .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    VStack(spacing: 16) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Create Habit")
-                                .font(.system(.title3, design: .rounded).weight(.bold))
-                                .foregroundColor(.white)
-                            Text("Track it daily from your home dashboard.")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundColor(.white.opacity(0.72))
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                Circle()
+                    .fill(selectedColor.opacity(0.22))
+                    .frame(width: 200, height: 200)
+                    .blur(radius: 52)
+                    .offset(x: 140, y: -240)
 
-                        TextField(
-                            "",
-                            text: $title,
-                            prompt: Text("Habit title")
-                                .foregroundColor(.white.opacity(0.48))
-                        )
-                        .focused($isTitleFocused)
-                        .textInputAutocapitalization(.words)
-                        .foregroundColor(.white)
-                        .tint(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 11)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.black.opacity(0.88))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.white.opacity(0.16), lineWidth: 1)
-                                )
-                        )
-
-                        HStack(spacing: 10) {
-                            Button {
-                                dismiss()
-                            } label: {
-                                Text("Cancel")
-                                    .font(.subheadline.weight(.semibold))
-                                    .foregroundColor(.white.opacity(0.86))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .fill(Color.white.opacity(0.12))
-                                    )
-                            }
-                            .buttonStyle(.plain)
-
-                            Button {
-                                onSave()
-                            } label: {
-                                Text("Save")
-                                    .font(.subheadline.weight(.bold))
-                                    .foregroundColor(.black.opacity(0.86))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .fill(
-                                                LinearGradient(
-                                                    colors: [
-                                                        Color(red: 0.38, green: 0.86, blue: 1.0),
-                                                        Color(red: 0.32, green: 0.95, blue: 0.64)
-                                                    ],
-                                                    startPoint: .topLeading,
-                                                    endPoint: .bottomTrailing
-                                                )
-                                            )
-                                    )
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            .opacity(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.56 : 1)
-                        }
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        previewTile
+                        titleField
+                        iconPickerSection
+                        colorPickerSection
+                        Spacer(minLength: 12)
+                        saveRow
                     }
                     .padding(16)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.14, green: 0.17, blue: 0.24),
-                                        Color(red: 0.10, green: 0.12, blue: 0.18)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
-                                )
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
-                            )
-                    )
-                    .shadow(color: .black.opacity(0.35), radius: 18, x: 0, y: 12)
-                    .padding(.horizontal, 16)
-
-                    Spacer(minLength: 0)
                 }
-                .padding(.top, 12)
-
-                Circle()
-                    .fill(Color.cyan.opacity(0.18))
-                    .frame(width: 170, height: 170)
-                    .blur(radius: 42)
-                    .offset(x: 140, y: -210)
             }
+            .navigationTitle(mode.navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") {
-                        dismiss()
-                    }
-                    .foregroundColor(.white.opacity(0.86))
+                    Button("Close") { dismiss() }
+                        .foregroundColor(.white.opacity(0.86))
                 }
             }
             .toolbarBackground(Color.black.opacity(0.92), for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .onAppear {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    isTitleFocused = true
+                configureInitialState()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    if case .create = mode {
+                        isTitleFocused = true
+                    }
                 }
+            }
+        }
+    }
+
+    private var previewTile: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [selectedColor.opacity(0.46), selectedColor.opacity(0.22)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(selectedColor.opacity(0.55), lineWidth: 1)
+                    )
+                Image(systemName: selectedIcon.systemName)
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(selectedColor)
+            }
+            .frame(width: 62, height: 62)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(trimmedTitle.isEmpty ? "Your habit" : trimmedTitle)
+                    .font(.system(.headline, design: .rounded).weight(.bold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Text(selectedIcon.label)
+                    .font(.caption.weight(.medium))
+                    .foregroundColor(.white.opacity(0.64))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.white.opacity(0.07))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+        )
+    }
+
+    private var titleField: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Title")
+                .font(.caption.weight(.bold))
+                .foregroundColor(.white.opacity(0.66))
+                .tracking(0.6)
+
+            TextField(
+                "",
+                text: $title,
+                prompt: Text("Habit title")
+                    .foregroundColor(.white.opacity(0.48))
+            )
+            .focused($isTitleFocused)
+            .textInputAutocapitalization(.words)
+            .foregroundColor(.white)
+            .tint(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.black.opacity(0.70))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
+    private var iconPickerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Icon")
+                .font(.caption.weight(.bold))
+                .foregroundColor(.white.opacity(0.66))
+                .tracking(0.6)
+
+            LazyVGrid(columns: iconColumns, spacing: 10) {
+                ForEach(HabitIconCatalog.all) { icon in
+                    Button {
+                        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                            selectedIconID = icon.id
+                        }
+                        HapticService.tap()
+                    } label: {
+                        let isSelected = icon.id == selectedIconID
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(
+                                    isSelected
+                                    ? LinearGradient(
+                                        colors: [selectedColor.opacity(0.40), selectedColor.opacity(0.18)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                    : LinearGradient(
+                                        colors: [Color.white.opacity(0.08), Color.white.opacity(0.04)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(
+                                            isSelected ? selectedColor.opacity(0.85) : Color.white.opacity(0.10),
+                                            lineWidth: isSelected ? 1.4 : 1
+                                        )
+                                )
+                            Image(systemName: icon.systemName)
+                                .font(.system(size: 18, weight: .bold))
+                                .foregroundColor(isSelected ? selectedColor : .white.opacity(0.82))
+                        }
+                        .frame(height: 48)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var colorPickerSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Color")
+                .font(.caption.weight(.bold))
+                .foregroundColor(.white.opacity(0.66))
+                .tracking(0.6)
+
+            LazyVGrid(columns: swatchColumns, spacing: 10) {
+                ForEach(HabitSwatchCatalog.all) { swatch in
+                    Button {
+                        withAnimation(.spring(response: 0.24, dampingFraction: 0.88)) {
+                            selectedHex = swatch.hex
+                        }
+                        HapticService.tap()
+                    } label: {
+                        let isSelected = swatch.hex.lowercased() == selectedHex.lowercased()
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [swatch.color, swatch.color.opacity(0.70)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 40, height: 40)
+                                .overlay(
+                                    Circle()
+                                        .stroke(Color.white.opacity(isSelected ? 0.95 : 0.12), lineWidth: isSelected ? 2 : 1)
+                                )
+                                .shadow(color: isSelected ? swatch.color.opacity(0.55) : .clear, radius: 8, x: 0, y: 4)
+                            if isSelected {
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 14, weight: .heavy))
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var saveRow: some View {
+        HStack(spacing: 10) {
+            Button {
+                dismiss()
+            } label: {
+                Text("Cancel")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.white.opacity(0.86))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Color.white.opacity(0.10))
+                    )
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                guard !trimmedTitle.isEmpty else { return }
+                onSave(trimmedTitle, selectedIconID, selectedHex)
+            } label: {
+                Text(mode.primaryButtonTitle)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundColor(.black.opacity(0.86))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [selectedColor, selectedColor.opacity(0.72)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(trimmedTitle.isEmpty)
+            .opacity(trimmedTitle.isEmpty ? 0.55 : 1)
+        }
+    }
+
+    private func configureInitialState() {
+        switch mode {
+        case .create:
+            if title.isEmpty {
+                title = ""
+                selectedIconID = HabitIconCatalog.fallback.id
+                selectedHex = HabitSwatchCatalog.fallback.hex
+            }
+        case let .edit(initialTitle, initialIconID, initialHex):
+            if title.isEmpty {
+                title = initialTitle
+                selectedIconID = initialIconID
+                selectedHex = initialHex
             }
         }
     }

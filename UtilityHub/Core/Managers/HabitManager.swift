@@ -21,8 +21,39 @@ struct HabitManager {
         return (try? context.fetch(descriptor)) ?? []
     }
 
-    func create(title: String, targetPerDay: Int = 1, context: ModelContext) {
-        context.insert(UHHabit(title: title, targetPerDay: max(targetPerDay, 1)))
+    func create(
+        title: String,
+        targetPerDay: Int = 1,
+        iconID: String? = nil,
+        colorHex: String? = nil,
+        context: ModelContext
+    ) {
+        context.insert(
+            UHHabit(
+                title: title,
+                targetPerDay: max(targetPerDay, 1),
+                iconID: iconID,
+                colorHex: colorHex
+            )
+        )
+        try? context.save()
+    }
+
+    func update(
+        _ habit: UHHabit,
+        title: String? = nil,
+        iconID: String? = nil,
+        colorHex: String? = nil,
+        context: ModelContext
+    ) {
+        if let title {
+            let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !cleaned.isEmpty {
+                habit.title = cleaned
+            }
+        }
+        if let iconID { habit.iconID = iconID }
+        if let colorHex { habit.colorHex = colorHex }
         try? context.save()
     }
 
@@ -152,6 +183,30 @@ struct HabitManager {
             }
             .prefix(limit)
             .map { $0 }
+    }
+
+    func totalCompletionCount(context: ModelContext) -> Int {
+        allCompletions(context: context).count
+    }
+
+    /// Returns (current week completed, previous week completed) across all habits.
+    /// Each counts distinct habit-day pairs — i.e. how many "check-ins" happened.
+    func weekOverWeekCompletions(context: ModelContext) -> (current: Int, previous: Int) {
+        let calendar = Calendar.current
+        let today = Date().uhDayStart
+        guard let startOfThisWeek = calendar.date(byAdding: .day, value: -6, to: today) else {
+            return (0, 0)
+        }
+        let endOfThisWeek = calendar.date(byAdding: .day, value: 1, to: today) ?? today
+        guard let startOfLastWeek = calendar.date(byAdding: .day, value: -13, to: today),
+              let endOfLastWeek = calendar.date(byAdding: .day, value: -6, to: today) else {
+            return (0, 0)
+        }
+
+        let completions = allCompletions(context: context)
+        let current = completions.filter { $0.date >= startOfThisWeek && $0.date < endOfThisWeek }.count
+        let previous = completions.filter { $0.date >= startOfLastWeek && $0.date < endOfLastWeek }.count
+        return (current, previous)
     }
 
     func currentGlobalStreak(context: ModelContext) -> Int {

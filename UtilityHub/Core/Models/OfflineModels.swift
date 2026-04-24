@@ -49,17 +49,23 @@ final class UHHabit {
     var title: String
     var targetPerDay: Int
     var createdAt: Date
+    var iconID: String?
+    var colorHex: String?
 
     init(
         id: UUID = UUID(),
         title: String,
         targetPerDay: Int = 1,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        iconID: String? = nil,
+        colorHex: String? = nil
     ) {
         self.id = id
         self.title = title
         self.targetPerDay = targetPerDay
         self.createdAt = createdAt
+        self.iconID = iconID
+        self.colorHex = colorHex
     }
 }
 
