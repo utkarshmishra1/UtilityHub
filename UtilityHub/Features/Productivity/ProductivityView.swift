@@ -14,6 +14,7 @@ struct ProductivityView: View {
     @StateObject private var viewModel = ProductivityViewModel()
     @State private var showAddTaskSheet = false
     @State private var showHabitsBoard = false
+    @State private var showFocusMode = false
     @State private var newTaskTitle = ""
     @State private var editingReminderTask: UHTask?
 
@@ -85,6 +86,9 @@ struct ProductivityView: View {
                     .onDisappear {
                         viewModel.refresh(context: modelContext)
                     }
+            }
+            .fullScreenCover(isPresented: $showFocusMode) {
+                FocusModeView(viewModel: viewModel)
             }
         }
     }
@@ -355,30 +359,55 @@ struct ProductivityView: View {
             HubSectionHeader(title: "Focus (Pomodoro)")
 
             HubCard {
-                VStack(spacing: 12) {
-                    ProgressRingView(
-                        progress: viewModel.focusProgress,
-                        color: Color(red: 0.33, green: 0.45, blue: 0.93),
-                        lineWidth: 10,
-                        label: focusTimeText
-                    )
-                    .frame(width: 140, height: 140)
-                    .frame(maxWidth: .infinity)
-
-                    HStack(spacing: 10) {
-                        Button(viewModel.isFocusRunning ? "Pause" : "Start") {
-                            viewModel.startOrPauseFocus(context: modelContext)
+                Button {
+                    showFocusMode = true
+                } label: {
+                    HStack(spacing: 14) {
+                        ZStack {
+                            Circle()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.655, green: 0.545, blue: 0.98),
+                                            Color(red: 0.941, green: 0.671, blue: 0.988)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .frame(width: 52, height: 52)
+                                .shadow(color: Color(red: 0.655, green: 0.545, blue: 0.98).opacity(0.45), radius: 14, y: 4)
+                            Image(systemName: "moon.stars.fill")
+                                .font(.system(size: 20, weight: .bold))
+                                .foregroundColor(.white)
                         }
-                        .buttonStyle(.borderedProminent)
 
-                        Button("Reset") {
-                            viewModel.resetFocus()
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Enter Focus Mode")
+                                .font(.subheadline.weight(.bold))
+                                .foregroundColor(.primary)
+                            Text(focusCardSubtitle)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
-                        .buttonStyle(.bordered)
+
+                        Spacer()
+
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundColor(.secondary)
                     }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
         }
+    }
+
+    private var focusCardSubtitle: String {
+        let count = viewModel.focusSessionsToday
+        let unit = count == 1 ? "session" : "sessions"
+        return "Breathing orb · \(count) \(unit) today"
     }
 
     private var chartSection: some View {
@@ -397,12 +426,6 @@ struct ProductivityView: View {
                 .frame(height: 160)
             }
         }
-    }
-
-    private var focusTimeText: String {
-        let minutes = viewModel.focusRemainingSeconds / 60
-        let seconds = viewModel.focusRemainingSeconds % 60
-        return String(format: "%02d:%02d", minutes, seconds)
     }
 
 }

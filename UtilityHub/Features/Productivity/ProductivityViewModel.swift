@@ -28,19 +28,12 @@ final class ProductivityViewModel: ObservableObject {
     @Published var habits: [UHHabit] = []
     @Published var habitSummary = HabitSummary()
     @Published var weeklyScores: [DayProductivity] = []
-    @Published var focusRemainingSeconds: Int = 25 * 60
-    @Published var isFocusRunning = false
+    @Published var focusSessionsToday: Int = 0
 
     private let taskManager = TaskManager()
     private let habitManager = HabitManager()
     private let focusManager = FocusManager()
     private let activityManager = ActivityManager()
-    private var timer: Timer?
-    private weak var focusContext: ModelContext?
-
-    deinit {
-        timer?.invalidate()
-    }
 
     var filteredTasks: [UHTask] {
         switch taskFilter {
@@ -53,10 +46,6 @@ final class ProductivityViewModel: ObservableObject {
         }
     }
 
-    var focusProgress: Double {
-        1 - (Double(focusRemainingSeconds) / Double(25 * 60))
-    }
-
     func refresh(context: ModelContext) {
         tasks = taskManager.fetchAll(context: context)
         habits = habitManager.fetchAll(context: context)
@@ -67,6 +56,7 @@ final class ProductivityViewModel: ObservableObject {
             longestStreak: habitManager.longestStreak(context: context)
         )
         weeklyScores = buildWeeklyScores(context: context)
+        focusSessionsToday = focusManager.sessionsToday(context: context)
     }
 
     func addTask(title: String, reminderAt: Date? = nil, context: ModelContext) {
@@ -135,51 +125,11 @@ final class ProductivityViewModel: ObservableObject {
         habitManager.streak(for: habit, context: context)
     }
 
-    func startOrPauseFocus(context: ModelContext) {
-        if isFocusRunning {
-            stopFocus()
-            return
-        }
-
-        focusContext = context
-        isFocusRunning = true
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            Task { @MainActor in
-                self.tickFocus()
-            }
-        }
-    }
-
-    func resetFocus() {
-        stopFocus()
-        focusRemainingSeconds = 25 * 60
-    }
-
-    private func tickFocus() {
-        guard focusRemainingSeconds > 0 else {
-            completeFocusIfNeeded()
-            return
-        }
-        focusRemainingSeconds -= 1
-        if focusRemainingSeconds <= 0 {
-            completeFocusIfNeeded()
-        }
-    }
-
-    private func completeFocusIfNeeded() {
-        stopFocus()
-        guard let context = focusContext else { return }
-        focusManager.addSession(durationSeconds: 25 * 60, context: context)
+    func recordFocusCompletion(durationSeconds: Int, context: ModelContext) {
+        focusManager.addSession(durationSeconds: durationSeconds, context: context)
         activityManager.log("Completed Pomodoro session", type: "focus", context: context)
         HapticService.success()
-    }
-
-    private func stopFocus() {
-        timer?.invalidate()
-        timer = nil
-        isFocusRunning = false
+        refresh(context: context)
     }
 
     private func buildWeeklyScores(context: ModelContext) -> [DayProductivity] {
