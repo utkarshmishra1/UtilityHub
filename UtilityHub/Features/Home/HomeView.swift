@@ -14,11 +14,14 @@ struct HomeView: View {
     @AppStorage(AppPreferenceKeys.isStudentModeEnabled) private var isStudentModeEnabled = true
     @Binding var selectedTab: AppTab
     @StateObject private var viewModel = HomeViewModel()
+    @StateObject private var focusViewModel = ProductivityViewModel()
     @State private var activeQuickAction: HomeQuickAction?
     @State private var showHabitsBoard = false
     @State private var showNotesBoard = false
     @State private var showExpensesBoard = false
+    @State private var showFocusMode = false
     @State private var showTodoOverlay = false
+    @State private var animatedTodayProgress: Double = 0
     @State private var todoInput = ""
     @State private var todoFilter: TodoOverlayFilter = .all
     @State private var editingReminderTask: UHTask?
@@ -53,6 +56,12 @@ struct HomeView: View {
             .navigationBarHidden(true)
             .task {
                 viewModel.refresh(context: modelContext)
+                animatedTodayProgress = 0
+                try? await Task.sleep(nanoseconds: 180_000_000)
+                animatedTodayProgress = todayProgressValue
+            }
+            .onChange(of: viewModel.snapshot) { _, _ in
+                animatedTodayProgress = todayProgressValue
             }
             .navigationDestination(isPresented: $showHabitsBoard) {
                 HabitsBoardView()
@@ -71,6 +80,9 @@ struct HomeView: View {
                     .onDisappear {
                         viewModel.refresh(context: modelContext)
                     }
+            }
+            .fullScreenCover(isPresented: $showFocusMode) {
+                FocusModeView(viewModel: focusViewModel)
             }
             .onChange(of: showHabitsBoard) { _, isPresented in
                 if !isPresented {
@@ -107,8 +119,22 @@ struct HomeView: View {
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(.secondary)
                 HStack(spacing: 6) {
-                    Text("🔥 \(viewModel.streakDays) Day Streak")
-                        .font(.subheadline.weight(.semibold))
+                    HStack(spacing: 3) {
+                        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                            let t = context.date.timeIntervalSinceReferenceDate
+                            let scaleY = 1.0 + 0.08 * sin(t * 3.2)
+                            let scaleX = 1.0 + 0.04 * sin(t * 2.4 + 1.3)
+                            let rotation = 3.0 * sin(t * 2.1 + 0.6)
+                            let offsetY = -0.4 + 0.8 * sin(t * 3.7)
+                            Text("🔥")
+                                .font(.subheadline)
+                                .scaleEffect(x: scaleX, y: scaleY, anchor: .bottom)
+                                .rotationEffect(.degrees(rotation), anchor: .bottom)
+                                .offset(y: offsetY)
+                        }
+                        Text("\(viewModel.streakDays) Day Streak")
+                            .font(.subheadline.weight(.semibold))
+                    }
                     Text("Keep going!")
                         .font(.footnote.weight(.medium))
                         .foregroundColor(.secondary)
@@ -138,7 +164,7 @@ struct HomeView: View {
         VStack(spacing: 10) {
             HubSectionHeader(title: "Quick Actions")
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 14) {
+                LazyHStack(spacing: 10) {
                     ForEach(HomeQuickAction.allCases) { action in
                         QuickActionButton(
                             symbol: action.symbol,
@@ -155,6 +181,8 @@ struct HomeView: View {
                                 openTodoOverlay()
                             } else if action == .addHabit {
                                 showHabitsBoard = true
+                            } else if action == .focus {
+                                showFocusMode = true
                             } else if action == .addExpense {
                                 showExpensesBoard = true
                             } else if action == .notes {
@@ -170,29 +198,168 @@ struct HomeView: View {
         }
     }
 
+    private var todayProgressValue: Double {
+        let total = viewModel.snapshot.tasksTotal + viewModel.snapshot.habitsTotal
+        let done = viewModel.snapshot.tasksDone + viewModel.snapshot.habitsDone
+        return total > 0 ? Double(done) / Double(total) : 0
+    }
+
     private var snapshotSection: some View {
-        HubCard {
+        let snapshot = viewModel.snapshot
+        let percent = Int((todayProgressValue * 100).rounded())
+        let tasksTint = Color(red: 0.30, green: 0.52, blue: 1.00)
+        let habitsTint = Color(red: 0.62, green: 0.44, blue: 1.00)
+        let thirdTint = Color(red: 1.00, green: 0.62, blue: 0.34)
+
+        return HubCard {
             VStack(alignment: .leading, spacing: 14) {
                 HubSectionHeader(title: "Today Snapshot")
-                HStack(alignment: .top, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Tasks: \(viewModel.snapshot.tasksDone)/\(viewModel.snapshot.tasksTotal)")
-                            .font(.headline.weight(.semibold))
-                        Text("Habits: \(viewModel.snapshot.habitsDone)/\(viewModel.snapshot.habitsTotal)")
-                            .font(.headline.weight(.semibold))
-                    }
-
-                    if isStudentModeEnabled {
-                        Divider()
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(viewModel.snapshot.nextClassText)
-                                .font(.subheadline.weight(.medium))
-                            Text("Attendance Target: \(viewModel.attendanceTarget)%")
-                                .font(.subheadline.weight(.medium))
+                HStack(alignment: .center, spacing: 14) {
+                    VStack(spacing: 10) {
+                        snapshotChip(
+                            symbol: "checkmark.circle.fill",
+                            tint: tasksTint,
+                            value: "\(snapshot.tasksDone)/\(snapshot.tasksTotal)",
+                            label: "Tasks"
+                        )
+                        snapshotChip(
+                            symbol: "arrow.triangle.2.circlepath",
+                            tint: habitsTint,
+                            value: "\(snapshot.habitsDone)/\(snapshot.habitsTotal)",
+                            label: "Habits"
+                        )
+                        if isStudentModeEnabled {
+                            snapshotChip(
+                                symbol: "book.fill",
+                                tint: thirdTint,
+                                value: snapshot.nextClassText,
+                                label: "Next class"
+                            )
+                        } else {
+                            snapshotChip(
+                                symbol: "flame.fill",
+                                tint: thirdTint,
+                                value: "\(viewModel.streakDays) day" + (viewModel.streakDays == 1 ? "" : "s"),
+                                label: "Streak"
+                            )
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    todaySnapshotRing(percent: percent)
+                        .frame(width: 108, height: 108)
                 }
+            }
+        }
+    }
+
+    private func snapshotChip(symbol: String, tint: Color, value: String, label: String) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(tint.opacity(0.18))
+                    .frame(width: 30, height: 30)
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(tint)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(value)
+                    .font(.system(.subheadline, design: .rounded).weight(.bold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private func todaySnapshotRing(percent: Int) -> some View {
+        let clamped = min(max(animatedTodayProgress, 0), 1)
+        let lineWidth: CGFloat = 11
+        let ringColors: [Color] = [
+            Color(red: 0.52, green: 0.84, blue: 1.00),
+            Color(red: 0.42, green: 0.60, blue: 1.00),
+            Color(red: 0.56, green: 0.44, blue: 0.98),
+            Color(red: 0.72, green: 0.52, blue: 1.00),
+            Color(red: 0.52, green: 0.84, blue: 1.00)
+        ]
+
+        ZStack {
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color(red: 0.55, green: 0.44, blue: 1.0).opacity(0.20),
+                            Color.clear
+                        ],
+                        center: .center,
+                        startRadius: 4,
+                        endRadius: 60
+                    )
+                )
+                .blur(radius: 4)
+
+            Circle()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.14),
+                                    Color.white.opacity(0.02),
+                                    Color.black.opacity(0.14)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .blendMode(.plusLighter)
+                )
+                .overlay(
+                    Circle()
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.34), Color.white.opacity(0.0)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
+                )
+                .padding(lineWidth / 2)
+
+            Circle()
+                .stroke(Color.primary.opacity(0.08), lineWidth: lineWidth)
+
+            Circle()
+                .trim(from: 0, to: clamped)
+                .stroke(
+                    AngularGradient(
+                        gradient: Gradient(colors: ringColors),
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+                .shadow(color: Color(red: 0.54, green: 0.44, blue: 1.0).opacity(0.30),
+                        radius: 8, x: 0, y: 0)
+                .animation(.spring(response: 1.0, dampingFraction: 0.72), value: animatedTodayProgress)
+
+            VStack(spacing: 2) {
+                Text("\(percent)%")
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .foregroundColor(.primary)
+                    .contentTransition(.numericText())
+                Text("Today")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundColor(.secondary)
             }
         }
     }

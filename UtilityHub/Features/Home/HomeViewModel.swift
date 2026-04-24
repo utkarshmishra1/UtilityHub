@@ -12,7 +12,7 @@ import Combine
 
 @MainActor
 final class HomeViewModel: ObservableObject {
-    struct Snapshot {
+    struct Snapshot: Equatable {
         var tasksDone: Int = 0
         var tasksTotal: Int = 0
         var habitsDone: Int = 0
@@ -180,6 +180,8 @@ final class HomeViewModel: ObservableObject {
             HapticService.tap()
         case .notes:
             HapticService.tap()
+        case .focus:
+            HapticService.tap()
         }
         refresh(context: context)
     }
@@ -232,8 +234,9 @@ final class HomeViewModel: ObservableObject {
 enum HomeQuickAction: String, CaseIterable, Identifiable {
     case addTask
     case addHabit
-    case addExpense
     case notes
+    case focus
+    case addExpense
 
     var id: String { rawValue }
 
@@ -241,6 +244,7 @@ enum HomeQuickAction: String, CaseIterable, Identifiable {
         switch self {
         case .addTask: return "ToDo"
         case .addHabit: return "Add Habit"
+        case .focus: return "Focus"
         case .addExpense: return "Expenses"
         case .notes: return "Notes"
         }
@@ -250,6 +254,7 @@ enum HomeQuickAction: String, CaseIterable, Identifiable {
         switch self {
         case .addTask: return "checklist"
         case .addHabit: return "arrow.triangle.2.circlepath"
+        case .focus: return "timer"
         case .addExpense: return "creditcard.and.123"
         case .notes: return "note.text"
         }
@@ -261,6 +266,8 @@ enum HomeQuickAction: String, CaseIterable, Identifiable {
             return Color(red: 0.30, green: 0.45, blue: 0.92)
         case .addHabit:
             return Color(red: 0.28, green: 0.72, blue: 0.99)
+        case .focus:
+            return Color(red: 0.62, green: 0.44, blue: 1.00)
         case .addExpense:
             return Color(red: 0.12, green: 0.73, blue: 0.69)
         case .notes:
