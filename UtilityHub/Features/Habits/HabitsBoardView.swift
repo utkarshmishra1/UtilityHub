@@ -940,7 +940,7 @@ private struct HabitDayDot: View {
                             lineWidth: isToday && !completed ? 1.3 : 1
                         )
                 )
-                .shadow(color: completed ? tint.opacity(0.35) : .clear, radius: 6, x: 0, y: 3)
+//                .shadow(color: completed ? tint.opacity(0.35) : .clear, radius: 6, x: 0, y: 3)
 
             if completed {
                 Image(systemName: "checkmark")
