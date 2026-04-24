@@ -11,14 +11,14 @@ struct AppStartupView: View {
                 .opacity(showSplash ? 0 : 1)
 
             if showSplash {
-                AppSplashView(imageName: "Image") // Replace with your asset name if different
+                AppSplashView()
                     .transition(.opacity)
                     .zIndex(1)
             }
         }
         .onAppear {
-            // Keep the splash for a brief moment; adjust as needed or tie to async startup tasks
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            // Hold the splash for 3 seconds so the full entrance animation lands with a beat, then fade out.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
                 withAnimation(.easeInOut(duration: 0.35)) {
                     showSplash = false
                 }
