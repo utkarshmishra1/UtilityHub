@@ -44,15 +44,3 @@ UtilityHub/
 └── tools/                   # Auxiliary scripts
 ```
 
-## Getting Started
-
-1. Clone the repository.
-2. Open `UtilityHub.xcodeproj` in Xcode 15 or later.
-3. Ensure a valid `GoogleService-Info.plist` is present in `UtilityHub/`.
-4. Select an iOS 17+ simulator or device and run (⌘R).
-
-## Requirements
-
-- Xcode 15+
-- iOS 17+
-- Swift 5.9+
