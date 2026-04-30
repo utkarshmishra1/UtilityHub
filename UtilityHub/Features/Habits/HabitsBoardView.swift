@@ -1088,6 +1088,7 @@ private struct HabitMonthDetailView: View {
 
                 ScrollView(showsIndicators: false) {
                     VStack(spacing: 16) {
+                        detailTitleHeader
                         detailHero
                         monthHeader
                         monthWeekHeader
@@ -1098,6 +1099,8 @@ private struct HabitMonthDetailView: View {
                 }
             }
             .navigationTitle(habit.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
@@ -1118,6 +1121,40 @@ private struct HabitMonthDetailView: View {
                 viewModel.refresh(context: modelContext)
             }
         }
+    }
+
+    private var detailTitleHeader: some View {
+        let icon = viewModel.icon(for: habit)
+        return HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(color.opacity(0.22))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(color.opacity(0.55), lineWidth: 1)
+                    )
+                Image(systemName: icon.systemName)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundColor(color)
+            }
+            .frame(width: 48, height: 48)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(habit.title)
+                    .font(.title2.weight(.bold))
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                Text("Habit details")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.white.opacity(0.62))
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var detailHero: some View {
