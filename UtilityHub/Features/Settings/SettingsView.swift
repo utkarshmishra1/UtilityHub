@@ -11,6 +11,7 @@ struct SettingsView: View {
     @AppStorage("display_name") private var displayName = "User"
 
     @State private var draftName = ""
+    @FocusState private var isNameFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -29,6 +30,15 @@ struct SettingsView: View {
         }
     }
 
+    private func saveName() {
+        let clean = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !clean.isEmpty {
+            displayName = clean
+            draftName = clean
+        }
+        isNameFieldFocused = false
+    }
+
     private var accountSection: some View {
         VStack(spacing: 10) {
             HubSectionHeader(title: "Account")
@@ -39,12 +49,10 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                     TextField("Change Name", text: $draftName)
                         .textFieldStyle(.roundedBorder)
-                    Button("Save Name") {
-                        let clean = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !clean.isEmpty {
-                            displayName = clean
-                        }
-                    }
+                        .focused($isNameFieldFocused)
+                        .submitLabel(.done)
+                        .onSubmit(saveName)
+                    Button("Save Name", action: saveName)
                     .buttonStyle(.borderedProminent)
                 }
             }
