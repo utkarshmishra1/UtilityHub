@@ -21,6 +21,14 @@ An all-in-one iOS productivity companion built with SwiftUI. UtilityHub bundles 
 - **Local notifications** for task reminders
 - Supporting Python **tools** and a **backend** folder for auxiliary data pipelines
 
+## Getting Started
+
+Open `UtilityHub.xcodeproj` in Xcode, select the `UtilityHub` scheme, and run on an iOS Simulator. For a quick command-line build:
+
+```bash
+xcodebuild -project UtilityHub.xcodeproj -scheme UtilityHub -destination 'generic/platform=iOS Simulator' build
+```
+
 ## Project Structure
 
 ```
@@ -43,4 +51,3 @@ UtilityHub/
 ├── backend/                 # Server-side helpers
 └── tools/                   # Auxiliary scripts
 ```
-
